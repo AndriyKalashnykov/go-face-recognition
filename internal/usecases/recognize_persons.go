@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Kagami/go-face"
-	"github.com/andre-ols/go-face-recognition/internal/entity"
+	"github.com/AndriyKalashnykov/go-face"
+	"github.com/AndriyKalashnykov/go-face-recognition/internal/entity"
 )
 
 type RecognizePersonsUseCase interface {

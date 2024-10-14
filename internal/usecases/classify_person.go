@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Kagami/go-face"
+	"github.com/AndriyKalashnykov/go-face"
 )
 
 type ClassifyPersonsUseCase interface {

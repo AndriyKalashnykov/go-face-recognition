@@ -57,7 +57,7 @@ The system enables effortless recognition of faces within images, empowering use
 1. Clone this repository:
 
 ```bash
-git clone https://github.com/andre-ols/go-face-recognition.git
+git clone https://github.com/AndriyKalashnykov/go-face-recognition.git
 ```
 
 2. Navigate to the project directory:

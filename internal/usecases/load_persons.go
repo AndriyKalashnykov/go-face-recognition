@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/andre-ols/go-face-recognition/internal/entity"
+	"github.com/AndriyKalashnykov/go-face-recognition/internal/entity"
 )
 
 type LoadPersonsUseCase interface {

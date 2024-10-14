@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Kagami/go-face"
-	"github.com/andre-ols/go-face-recognition/internal/entity"
-	"github.com/andre-ols/go-face-recognition/internal/usecases"
+	"github.com/AndriyKalashnykov/go-face"
+	"github.com/AndriyKalashnykov/go-face-recognition/internal/entity"
+	"github.com/AndriyKalashnykov/go-face-recognition/internal/usecases"
 )
 
 var (
