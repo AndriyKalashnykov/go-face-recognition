@@ -1,4 +1,4 @@
-FROM ghcr.io/anriykalashnykov/go-face:latest AS builder
+FROM anriykalashnykov/go-face:latest AS builder
 
 # Set the working directory
 WORKDIR /app
