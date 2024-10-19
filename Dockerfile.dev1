@@ -1,0 +1,78 @@
+#FROM anriykalashnykov/go-face:latest AS builder
+
+#FROM ghcr.io/andriykalashnykov/dlib-docker:v0.0.1 AS dlib-dev
+#FROM golang:1.23.2-alpine3.20 AS builder
+#COPY --from=dlib-dev /usr/local/include/dlib/ /usr/local/include/dlib/
+#COPY --from=dlib-dev /usr/local/lib64/ /usr/local/lib64/
+#ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
+
+
+
+FROM ubuntu:22.04 AS builder
+
+ENV DLIB_VERSION=19.24
+
+RUN apt-get update
+RUN apt-get install -y build-essential cmake curl
+RUN apt-get install -y libblas-dev libblas-dev libatlas-base-dev liblapack-dev
+#    libjpeg-turbo8
+RUN curl -sLO https://go.dev/dl/go1.23.2.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz && rm -rf go1.23.2.linux-amd64.tar.gz
+
+#FROM golang:1.23 AS builder
+# Install go-face dependencies
+#RUN apt-get update
+#RUN apt-get install -y build-essential cmake curl
+#RUN apt-get update && apt-get -y install \
+#    libdlib-dev \
+#    libblas-dev \
+#    libatlas-base-dev \
+#    liblapack-dev \
+#    libjpeg62-turbo-dev
+
+RUN mkdir /dlib && cd /dlib && curl -sLO http://dlib.net/files/dlib-19.24.tar.bz2 && tar xf dlib-19.24.tar.bz2
+RUN cd /dlib/dlib-19.24 && mkdir build && cd build && cmake .. && cmake --build . --config Release && make install && rm -rf /dlib
+RUN cp /usr/local/include/dlib/external/libjpeg/*.h /usr/include/
+
+# https://github.com/imishinist/dlib/blob/master/19.21/buster/Dockerfile
+#RUN mkdir /dlib && cd /dlib && curl -sLO http://dlib.net/files/dlib-${DLIB_VERSION}.tar.bz2 && tar xf dlib-${DLIB_VERSION}.tar.bz2
+#RUN cd /dlib/dlib-${DLIB_VERSION} && mkdir build && cd build && cmake .. && cmake -DDLIB_PNG_SUPPORT=ON -DDLIB_GIF_SUPPORT=ON -DDLIB_JPEG_SUPPORT=ON -DDLIB_NO_GUI_SUPPORT=ON --build . --config Release && make -j4 && make install && rm -rf /dlib \
+#    apt-get autoremove -y; apt-get clean; rm -rf /var/cache; \
+#    rm /dlib/dlib-${DLIB_VERSION}.tar.bz2
+# Missing header file.
+#RUN cp /usr/local/include/dlib/external/libjpeg/*.h /usr/include/
+
+
+# Set the working directory
+WORKDIR /app
+
+# Copy go modules files
+COPY ./go.mod .
+COPY ./go.sum .
+
+RUN /usr/local/go/bin/go mod download
+
+# Copy the source code
+COPY ./internal/ internal/
+COPY ./models/ models/
+COPY ./images/ images/
+COPY ./cmd/ cmd/
+COPY ./fonts fonts
+COPY ./persons persons
+
+#WORKDIR /app/cmd
+#RUN go mod tidy
+#WORKDIR /appHi
+
+RUN CGO_LDFLAGS="-static" /usr/local/go/bin/go build -tags static -o cmd/main cmd/main.go
+#RUN CGO_LDFLAGS="-static" /usr/local/go/bin/go build -tags static -o cmd/main cmd/main.go
+
+#RUN --mount=target=. \
+#    --mount=type=cache,target=/root/.cache/go-build \
+#    --mount=type=cache,target=/go/pkg \
+#     go test ./...
+
+# https://hub.docker.com/_/alpine/tags
+FROM alpine:3.20.3 AS runtime
+COPY --from=builder /app/cmd/main /
+# Keep the container running
+CMD ["tail", "-f", "/dev/null"]

@@ -45,7 +45,7 @@ bootstrap: ## bootstrap build dblib image
 
 .PHONY: bi
 bi: ## build go-face-recognition Docker image
-	docker buildx build --platform linux/amd64 --load -f Dockerfile -t ghcr.io/anriykalashnykov/go-face-recognition:latest .
+	docker build --platform linux/amd64 --load -f Dockerfile -t ghcr.io/anriykalashnykov/go-face-recognition:latest .
 
 .PHONY: ri
 ri: ## run go-face-recognition image
@@ -54,3 +54,7 @@ ri: ## run go-face-recognition image
 #version: @ Print current version(tag)
 version:
 	@echo $(shell git describe --tags --abbrev=0)
+
+dp:
+	docker system prune
+	docker buildx prune
