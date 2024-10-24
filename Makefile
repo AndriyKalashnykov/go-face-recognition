@@ -45,11 +45,11 @@ bootstrap: ## bootstrap build dblib image
 
 .PHONY: bi
 bi: ## build go-face-recognition Docker image
-	docker build --platform linux/amd64 --load -f Dockerfile -t ghcr.io/anriykalashnykov/go-face-recognition:latest .
+	docker build --platform linux/amd64 -f Dockerfile -t anriykalashnykov/go-face-recognition:latest .
 
 .PHONY: ri
 ri: ## run go-face-recognition image
-	docker run --rm -v $PWD:/app -w /app -it ghcr.io/anriykalashnykov/go-face-recognition:latest /bin/bash
+	docker run --rm -v $PWD:/app -w /app -it anriykalashnykov/go-face-recognition:latest /bin/bash
 
 #version: @ Print current version(tag)
 version:

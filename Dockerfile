@@ -1,24 +1,9 @@
-# https://hub.docker.com/_/ubuntu/tags
-FROM ubuntu:24.10 AS builder
 
-RUN apt-get update
-RUN apt-get install -y build-essential cmake curl
 
-## Install go-face dependencies
-RUN apt-get install -y \
-    libdlib-dev \
-    libopenblas-dev \
-    libblas-dev \
-    libblaspp-dev \
-    libatlas-base-dev \
-    libgslcblas0 \
-    libjpeg-dev \
-    libpng-dev \
-    liblapack-dev \
-    libjpeg-turbo8-dev \
-    gfortran
+FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0 AS builder
 
-RUN curl -sLO https://go.dev/dl/go1.23.2.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz && rm -rf go1.23.2.linux-amd64.tar.gz
+#ENV DEBIAN_FRONTEND=noninteractive
+#RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends gfortran
 
 # Set the working directory
 WORKDIR /app
@@ -32,15 +17,21 @@ COPY ./internal/ internal/
 COPY ./models/ models/
 COPY ./images/ images/
 COPY ./cmd/ cmd/
-COPY ./fonts fonts
-COPY ./persons persons
+COPY ./fonts fonts/
+COPY ./persons persons/
 
 #WORKDIR /app/cmd
 #RUN /usr/local/go/bin/go mod tidy
 
-RUN CGO_ENABLED=1 CGO_LDFLAGS="-static -lgfortran" /usr/local/go/bin/go build -tags static -o cmd/main cmd/main.go
+# Install Go
+RUN curl -sLO https://go.dev/dl/go1.23.2.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz && rm -rf go1.23.2.linux-amd64.tar.gz
 
-FROM alpine
+ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
+
+RUN /usr/local/go/bin/go mod download
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+
+FROM alpine:3.20.3
 WORKDIR /app
 COPY --from=builder /app/cmd/main .
 # Keep the container running
