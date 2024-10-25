@@ -18,7 +18,11 @@ RUN apt-get install -y \
     libjpeg-turbo8-dev \
     gfortran
 
-RUN curl -sLO https://go.dev/dl/go1.23.2.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz && rm -rf go1.23.2.linux-amd64.tar.gz
+# https://hub.docker.com/_/golang/
+# Install Go
+RUN curl -sLO https://go.dev/dl/go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && tar -C /usr/local -xzf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && rm -rf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
 
 # Set the working directory
 WORKDIR /app
@@ -38,7 +42,7 @@ COPY ./persons persons
 ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
 RUN /usr/local/go/bin/go mod download
-RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+RUN CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
 
 FROM alpine:3.20.3 AS runtime
 
