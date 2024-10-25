@@ -5,7 +5,7 @@ RUN apt-get update
 RUN apt-get install -y build-essential cmake curl
 
 ## Install go-face dependencies
-RUN apt-get install -y \
+RUN apt-get -y --install-recommends \
     libdlib-dev \
     libopenblas-dev \
     libblas-dev \
@@ -16,7 +16,8 @@ RUN apt-get install -y \
     libpng-dev \
     liblapack-dev \
     libjpeg-turbo8-dev \
-    gfortran
+    gfortran \
+    libgfortran5 libquadmath0-amd64-cross libquadrule-dev
 
 # https://hub.docker.com/_/golang/
 # Install Go
