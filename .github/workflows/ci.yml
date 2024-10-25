@@ -89,7 +89,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.dlib-docker-go
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
+#          ,linux/arm64
           push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
