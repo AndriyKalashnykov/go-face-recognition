@@ -3,7 +3,7 @@
 FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends libquadmath0
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --no-install-recommends libquadmath0
 
 # Set the working directory
 WORKDIR /app
