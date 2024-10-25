@@ -1,0 +1,42 @@
+
+
+FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0 AS builder
+
+#ENV DEBIAN_FRONTEND=noninteractive
+#RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends gfortran
+
+# Set the working directory
+WORKDIR /app
+
+# Copy go modules files
+COPY ./go.mod .
+COPY ./go.sum .
+
+# Copy the source code
+COPY ./cmd/ cmd/
+COPY ./internal/ internal/
+
+# Copy the recources
+COPY ./fonts/ fonts/
+COPY ./images/ images/
+COPY ./models/ models/
+COPY ./persons/ persons/
+
+# Assuming Go is installed by GitHub action
+ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
+
+RUN go mod download
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+
+FROM alpine:3.20.3 AS runtime
+
+WORKDIR /app
+
+COPY --from=builder /app/cmd/main .
+COPY --from=builder /app/fonts fonts/
+COPY --from=builder /app/images/ images/
+COPY --from=builder /app/models/ models/
+COPY --from=builder /app/persons/ persons/
+
+# Keep the container running
+CMD ["tail", "-f", "/dev/null"]
