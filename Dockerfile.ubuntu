@@ -5,7 +5,7 @@ RUN apt-get update
 RUN apt-get install -y build-essential cmake curl
 
 ## Install go-face dependencies
-RUN apt-get -y --install-recommends \
+RUN apt-get install -y --install-recommends \
     libdlib-dev \
     libopenblas-dev \
     libblas-dev \
