@@ -5,7 +5,7 @@ services:
     container_name: go-face-recognition
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dlib-docker-go
     volumes:
       - "./internal:/app/internal"
       - "./images:/app/images"

@@ -69,42 +69,23 @@ cd go-face-recognition
 3. Build the Docker image:
 
 ```bash
-docker compose up --build -d
+make bi
+# or
+# docker compose up --build -d
 ```
 
 4. Run the Docker container:
 
 ```bash
-docker exec go-face-recognition go run cmd/main.go
+make ri
+/app # ./main
+# or
+# docker exec go-face-recognition ./main
 ```
 
 This will execute the project inside the Docker container and demonstrate facial recognition.
 
 ## Project Structure
-
-```
-go-face-recognition/
-├── images/
-│ ├── result.jpg
-│ └── unknown.jpg
-├── persons/
-│ ├── donald_trump/
-│ │ └── ...
-│ └── joe_biden/
-│ └── ...
-├── models/
-│ └── ...
-├── internal/
-│ ├── entity/
-│ └── usecases/
-├── cmd/
-│ └── main.go
-├── Dockerfile
-├── docker-compose.yml
-├── go.mod
-├── go.sum
-└── README.md
-```
 
 The `images/` directory contains the input and output images. The `persons/` directory contains sub-folders for each person, with images of that person to be used in the model. The `models/` directory contains the trained model for facial recognition. The `internal/` directory contains the core logic of the system, including entities and use cases. The `cmd/` directory contains the main entry point of the system.
 

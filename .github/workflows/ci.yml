@@ -14,7 +14,7 @@ permissions:
 
 jobs:
 
-  tests:
+  docker-image:
     strategy:
       matrix:
         name: [ unit ]
