@@ -59,3 +59,24 @@ version:
 dp:
 	docker system prune
 	docker buildx prune
+
+
+# setup Docker to run arm64 images on Ubuntu x86_64
+# https://jkfran.com/running-ubuntu-arm-with-docker/
+# https://www.stereolabs.com/docs/docker/building-arm-container-on-x86
+# https://github.com/carlosperate/arm-none-eabi-gcc-action
+# https://embeddedinventor.com/a-complete-beginners-guide-to-the-gnu-arm-toolchain-part-1/
+# export PATH=/path/to/install/dir/bin:$PATH
+sd:
+	docker run --privileged --rm tonistiigi/binfmt --install all
+	docker run -it --rm --platform linux/arm64 arm64v8/ubuntu sh
+# uname -m
+# aarch64
+
+# --platform linux/arm64
+ba:
+	docker build -f Dockerfile.amd64 -t anriykalashnykov/amd64:latest .
+	docker build -f Dockerfile.arm64 -t anriykalashnykov/arm64:latest .
+
+ra:
+	docker run --rm -it anriykalashnykov/arm64:latest /bin/sh

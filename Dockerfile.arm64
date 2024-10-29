@@ -1,0 +1,10 @@
+FROM anriykalashnykov/amd64:latest AS builder
+
+FROM arm64v8/debian:bookworm AS runtime
+
+WORKDIR /app
+
+COPY --from=builder /app/hello .
+
+# Keep the container running
+CMD ["tail", "-f", "/dev/null"]
