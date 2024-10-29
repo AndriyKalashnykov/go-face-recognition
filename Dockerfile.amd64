@@ -15,9 +15,12 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommend
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y qemu-user-static qemu-user binfmt-support
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y gdb-multiarch gcc-arm-none-eabi
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu \
-    clang-14 clang-15 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-    gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6-dev-armhf-cross libc6-dev-arm64-cross
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
+    clang gcc clang-15 \
+    gcc-x86-64-linux-gnu g++-x86-64-linux-gnu binutils-x86-64-linux-gnu \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+    gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+    libc6-dev-arm64-cross libc6-dev-armel-cross libc6-dev-armhf-cross libc6-dev-i386
 
 #RUN ln -sf $(which gcc) /usr/local/bin/gcc-aarch64-linux-gnu \
 #    && ln -sf $(which g++) /usr/local/bin/g++-aarch64-linux-gnu
