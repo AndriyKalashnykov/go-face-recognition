@@ -20,6 +20,7 @@ jobs:
     name: docker-image-builder
 
     steps:
+
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
@@ -96,6 +97,35 @@ jobs:
       needs: [ docker-image-builder ]
 
       steps:
+
+        - name: Checkout code
+          uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+          with:
+            fetch-depth: 0
+
+        - name: Set up QEMU
+          uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+
+        - name: Convert owner to lower case
+          run: |
+            echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+          env:
+            OWNER: '${{ github.repository_owner }}'
+
+        - name: Login to image repository
+          uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+          with:
+            registry: ghcr.io
+            username: ${{ github.actor }}
+            password: ${{ secrets.GH_ACCESS_TOKEN }}
+
+        - name: GitHub Tag Name example
+          run: |
+            echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
+            echo "Tag name from github.ref_name: ${{  github.ref_name }}"
 
         - name: Docker runtime meta
           id: meta_runtime
