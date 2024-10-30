@@ -56,7 +56,7 @@ jobs:
           images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
           flavor: |
             latest=true
-            suffix=builder
+            suffix=-builder
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -92,7 +92,7 @@ jobs:
   docker-image-runtime:
 
       runs-on: ubuntu-latest
-      name: docker-image-builder
+      name: docker-image-runtime
       needs: [ docker-image-builder ]
 
       steps:
