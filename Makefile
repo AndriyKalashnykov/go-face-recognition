@@ -78,6 +78,8 @@ ba:
 
 ra:
 	docker run -it --rm --platform linux/arm64 docker.io/anriykalashnykov/arm64:latest /bin/sh
+	docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+	docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
 
 dt:
 	rm -f version.txt

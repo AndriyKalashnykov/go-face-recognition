@@ -70,17 +70,29 @@ cd go-face-recognition
 
 ```bash
 make bi
-# or
-# docker compose up --build -d
-```
-
-4. Run the Docker container:
-
-```bash
 make ri
 /app # ./main
-# or
-# docker exec go-face-recognition ./main
+```
+
+5. Run the Docker image:
+
+```bash
+docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+````
+
+in a console type:
+
+```bash
+uname -m
+./main
+```
+
+5. Run the Docker container:
+
+```bash
+docker compose up --build -d
+docker exec go-face-recognition ./main
 ```
 
 This will execute the project inside the Docker container and demonstrate facial recognition.
