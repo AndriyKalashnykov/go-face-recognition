@@ -16,7 +16,7 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommend
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y qemu-user-static qemu-user binfmt-support
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y gdb-multiarch gcc-arm-none-eabi
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
-    cmake clang gcc-12 \
+    cmake clang gcc g++ \
     gcc-x86-64-linux-gnu g++-x86-64-linux-gnu binutils-x86-64-linux-gnu \
     gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
     gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
@@ -35,11 +35,12 @@ WORKDIR /app
 COPY ./hello.c .
 COPY ./quadmath.cpp .
 
-#RUN gcc -static -static-libgcc -std=c++11 hello.c -o hello
-RUN aarch64-linux-gnu-gcc -static  hello.c -o hello
+#RUN aarch64-linux-gnu- -static -static-libgcc -std=c++11 hello.c -o hello
+RUN gcc -g -Wall -Wextra -Wunreachable-code -static  hello.c -o hello -lm -llapack -lblas -lpthread -lgfortran -lquadmath
 
-#RUN aarch64-linux-gnu-g++ --std=gnu++20 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -fext-numeric-literals -static -lgfortran -lquadmath quadmath.cpp -o quadmath
-RUN g++ -I/usr/lib/gcc/x86_64-linux-gnu/12 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -static -lm -lgfortran -lboost_system -lquadmath quadmath.cpp -o quadmath
+#RUN aarch64-linux-gnu-g++ --std=gnu++20 -I/usr/lib/gcc/x86_64-linux-gnu/12 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -fext-numeric-literals -static -lgfortran -lquadmath quadmath.cpp -o quadmath
+RUN g++ -g -Wall -Wextra -Wunreachable-code -static quadmath.cpp -o qm -lm -llapack -lblas -lpthread -lgfortran -lquadmath
+# RUN g++
 
 # arm-none-eabi-gcc -static hello.c -o hello
 # find / -name aarch64-linux-gnu-gcc-10

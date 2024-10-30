@@ -73,10 +73,10 @@ sd:
 # uname -m
 # aarch64
 
-# --platform linux/arm64
+
 ba:
 	docker build -f Dockerfile.amd64 -t anriykalashnykov/amd64:latest .
 	docker build -f Dockerfile.arm64 -t anriykalashnykov/arm64:latest .
 
 ra:
-	docker run --rm -it anriykalashnykov/amd64:latest /bin/sh
+	docker run --rm -it anriykalashnykov/arm64:latest /bin/sh
