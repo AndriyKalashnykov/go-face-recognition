@@ -1,7 +1,7 @@
 FROM ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-builder AS builder
 
 # https://hub.docker.com/_/alpine/tags
-FROM arm64v8/alpine:3.20.3 AS runtime
+FROM alpine:3.20.3 AS runtime
 
 WORKDIR /app
 

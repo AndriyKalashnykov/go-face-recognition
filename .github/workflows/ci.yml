@@ -134,7 +134,7 @@ jobs:
             images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
             flavor: |
               latest=false
-              suffix=runtime
+              suffix=-runtime
             tags: |
               type=ref,event=branch
               type=ref,event=tag
@@ -156,7 +156,7 @@ jobs:
           with:
             context: .
             file: ./Dockerfile.alpine.runtme
-            platforms: linux/arm64
+            platforms: linux/arm64,linux/amd64
             push: ${{ github.ref_type == 'tag' }}
             provenance: false
             tags: ${{ steps.meta_runtime.outputs.tags }}
