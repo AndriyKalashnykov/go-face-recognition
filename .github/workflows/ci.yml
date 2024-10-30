@@ -14,13 +14,11 @@ permissions:
 
 jobs:
 
-  docker-image:
-    strategy:
-      matrix:
-        name: [ unit ]
-        go-version: [ 1.23.2 ]
+  docker-image-builder:
+
     runs-on: ubuntu-latest
-    name: test (${{ matrix.name }})
+    name: docker-image-builder
+
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -91,42 +89,50 @@ jobs:
       - name: Output docker_builder image digest
         run: echo ${{ steps.docker_builder.outputs.digest }}
 
-      - name: Docker runtime meta
-        id: meta_runtime
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
-        with:
-          images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
-          flavor: |
-            latest=true
-            suffix=
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=ref,event=pr
-            type=semver,pattern=v{{version}}
-          labels: |
-            org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
-            org.opencontainers.image.title=Face recognition in Go with Dlib - runtime
-            org.opencontainers.image.description=Face recognition in Go with Dlib - runtime
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.version=${{  github.ref_name }}"
-            io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
-            io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
-            io.artifacthub.package.license=MIT
+  docker-image-runtime:
 
-      - name: Build and push runtime
-        id: docker_runtime
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
-        with:
-          context: .
-          file: ./Dockerfile.alpine.runtme
-          platforms: linux/arm64
-          push: ${{ github.ref_type == 'tag' }}
-          provenance: false
-          tags: ${{ steps.meta_runtime.outputs.tags }}
-          labels: ${{ steps.meta_runtime.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      runs-on: ubuntu-latest
+      name: docker-image-builder
+      needs: [ docker-image-builder ]
 
-      - name: Output docker_builder image digest
-        run: echo ${{ steps.docker_runtime.outputs.digest }}
+      steps:
+
+        - name: Docker runtime meta
+          id: meta_runtime
+          uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
+          with:
+            images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
+            flavor: |
+              latest=true
+              suffix=
+            tags: |
+              type=ref,event=branch
+              type=ref,event=tag
+              type=ref,event=pr
+              type=semver,pattern=v{{version}}
+            labels: |
+              org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
+              org.opencontainers.image.title=Face recognition in Go with Dlib - runtime
+              org.opencontainers.image.description=Face recognition in Go with Dlib - runtime
+              org.opencontainers.image.licenses=MIT
+              org.opencontainers.image.version=${{  github.ref_name }}"
+              io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
+              io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
+              io.artifacthub.package.license=MIT
+
+        - name: Build and push runtime
+          id: docker_runtime
+          uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+          with:
+            context: .
+            file: ./Dockerfile.alpine.runtme
+            platforms: linux/arm64
+            push: ${{ github.ref_type == 'tag' }}
+            provenance: false
+            tags: ${{ steps.meta_runtime.outputs.tags }}
+            labels: ${{ steps.meta_runtime.outputs.labels }}
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
+
+        - name: Output docker_builder image digest
+          run: echo ${{ steps.docker_runtime.outputs.digest }}
