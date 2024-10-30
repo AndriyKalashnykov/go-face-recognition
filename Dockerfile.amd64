@@ -35,7 +35,7 @@ WORKDIR /app
 COPY ./hello.c .
 COPY ./quadmath.cpp .
 
-#RUN aarch64-linux-gnu- -static -static-libgcc -std=c++11 hello.c -o hello
+#RUN aarch64-linux-gnu-gcc -static -static-libgcc -std=c++11 hello.c -o hello
 RUN gcc -g -Wall -Wextra -Wunreachable-code -static  hello.c -o hello -lm -llapack -lblas -lpthread -lgfortran -lquadmath
 
 #RUN aarch64-linux-gnu-g++ --std=gnu++20 -I/usr/lib/gcc/x86_64-linux-gnu/12 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -fext-numeric-literals -static -lgfortran -lquadmath quadmath.cpp -o quadmath
@@ -44,6 +44,7 @@ RUN g++ -g -Wall -Wextra -Wunreachable-code -static quadmath.cpp -o qm -lm -llap
 
 # arm-none-eabi-gcc -static hello.c -o hello
 # find / -name aarch64-linux-gnu-gcc-10
+# find / -name quadmath*
 
 # Keep the container running
 CMD ["tail", "-f", "/dev/null"]
