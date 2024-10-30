@@ -1,4 +1,4 @@
-FROM anriykalashnykov/amd64:latest AS builder
+FROM docker.io/anriykalashnykov/amd64:latest AS builder
 
 FROM arm64v8/alpine:3.20.3 AS runtime
 

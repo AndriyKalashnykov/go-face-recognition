@@ -1,0 +1,16 @@
+FROM ghcr.io/andriykalashnykov/go-face-recognition:latest-builder AS builder
+
+# https://hub.docker.com/_/alpine/tags
+FROM arm64v8/alpine:3.20.3 AS runtime
+
+WORKDIR /app
+
+COPY --from=builder /app/cmd/main .
+
+COPY --from=builder /app/fonts fonts/
+COPY --from=builder /app/images/ images/
+COPY --from=builder /app/models/ models/
+COPY --from=builder /app/persons/ persons/
+
+# Keep the container running
+CMD ["tail", "-f", "/dev/null"]

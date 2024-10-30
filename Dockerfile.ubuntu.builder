@@ -1,5 +1,5 @@
 # https://hub.docker.com/_/ubuntu/tags
-FROM ubuntu:24.10 AS builder
+FROM amd64/ubuntu:24.10 AS builder
 
 RUN apt-get update
 RUN apt-get install -y build-essential cmake curl
@@ -44,16 +44,6 @@ ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
 RUN /usr/local/go/bin/go mod download
 RUN CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
-
-FROM alpine:3.20.3 AS runtime
-
-WORKDIR /app
-
-COPY --from=builder /app/cmd/main .
-COPY --from=builder /app/fonts fonts/
-COPY --from=builder /app/images/ images/
-COPY --from=builder /app/models/ models/
-COPY --from=builder /app/persons/ persons/
 
 # Keep the container running
 CMD ["tail", "-f", "/dev/null"]
