@@ -16,11 +16,16 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommend
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y qemu-user-static qemu-user binfmt-support
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y gdb-multiarch gcc-arm-none-eabi
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
-    clang gcc clang-15 \
+    cmake clang gcc-12 \
     gcc-x86-64-linux-gnu g++-x86-64-linux-gnu binutils-x86-64-linux-gnu \
     gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
     gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
-    libc6-dev-arm64-cross libc6-dev-armel-cross libc6-dev-armhf-cross libc6-dev-i386
+    libc6-dev-arm64-cross libc6-dev-armel-cross libc6-dev-armhf-cross libc6-dev-i386 \
+    libdlib-dev libblas-dev libatlas-base-dev liblapack-dev libjpeg62-turbo-dev wget bzip2 \
+    gfortran libgfortran5 libquadmath0 libquadmath0-amd64-cross libquadrule-dev \
+    libboost-dev libboost-system-dev
+
+# /usr/lib/gcc/x86_64-linux-gnu/12/include/quadmath.h
 
 #RUN ln -sf $(which gcc) /usr/local/bin/gcc-aarch64-linux-gnu \
 #    && ln -sf $(which g++) /usr/local/bin/g++-aarch64-linux-gnu
@@ -28,9 +33,14 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommend
 WORKDIR /app
 
 COPY ./hello.c .
+COPY ./quadmath.cpp .
 
-#RUN gcc -static hello.c -o hello
-RUN aarch64-linux-gnu-gcc -static hello.c -o hello
+#RUN gcc -static -static-libgcc -std=c++11 hello.c -o hello
+RUN aarch64-linux-gnu-gcc -static  hello.c -o hello
+
+#RUN aarch64-linux-gnu-g++ --std=gnu++20 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -fext-numeric-literals -static -lgfortran -lquadmath quadmath.cpp -o quadmath
+RUN g++ -I/usr/lib/gcc/x86_64-linux-gnu/12 -I/usr/lib/gcc/x86_64-linux-gnu/12/include -static -lm -lgfortran -lboost_system -lquadmath quadmath.cpp -o quadmath
+
 # arm-none-eabi-gcc -static hello.c -o hello
 # find / -name aarch64-linux-gnu-gcc-10
 

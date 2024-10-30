@@ -79,4 +79,4 @@ ba:
 	docker build -f Dockerfile.arm64 -t anriykalashnykov/arm64:latest .
 
 ra:
-	docker run --rm -it anriykalashnykov/arm64:latest /bin/sh
+	docker run --rm -it anriykalashnykov/amd64:latest /bin/sh

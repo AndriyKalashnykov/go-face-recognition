@@ -5,6 +5,7 @@ FROM arm64v8/debian:bookworm AS runtime
 WORKDIR /app
 
 COPY --from=builder /app/hello .
+#COPY --from=builder /app/quadmath .
 
 # Keep the container running
 CMD ["tail", "-f", "/dev/null"]
