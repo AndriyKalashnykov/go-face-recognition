@@ -45,7 +45,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GH_ACCESS_TOKEN }}
 
-      - name: GitHub Tag Name example
+      - name: GitHub Tag Name
         run: |
           echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
           echo "Tag name from github.ref_name: ${{  github.ref_name }}"
@@ -122,7 +122,7 @@ jobs:
             username: ${{ github.actor }}
             password: ${{ secrets.GH_ACCESS_TOKEN }}
 
-        - name: GitHub Tag Name example
+        - name: GitHub Tag Name
           run: |
             echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
             echo "Tag name from github.ref_name: ${{  github.ref_name }}"

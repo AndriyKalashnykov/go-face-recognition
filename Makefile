@@ -46,11 +46,11 @@ bootstrap: ## bootstrap build dblib image
 .PHONY: bi
 bi: ## build go-face-recognition Docker image
 	docker build -f Dockerfile.ubuntu.builder -t andriykalashnykov/go-face-recognition:latest-builder .
-	docker build -f Dockerfile.alpine.runtme  -t andriykalashnykov/go-face-recognition:latest .
+	docker build -f Dockerfile.alpine.runtme  -t andriykalashnykov/go-face-recognition:latest-runtime .
 
 .PHONY: ri
 ri: ## run go-face-recognition image
-	docker run --rm -it --platform linux/arm64 andriykalashnykov/go-face-recognition:latest /bin/sh
+	docker run -it --rm --platform linux/amd64 andriykalashnykov/go-face-recognition:latest-runtime /bin/sh
 
 version: ## Print current version(tag)
 	@echo $(shell git describe --tags --abbrev=0)
@@ -71,13 +71,7 @@ sd:
 # uname -m
 # aarch64
 
-
-ba:
-	docker build -f Dockerfile.amd64 -t docker.io/anriykalashnykov/amd64:latest .
-	docker build -f Dockerfile.arm64 -t docker.io/anriykalashnykov/arm64:latest .
-
 ra:
-	docker run -it --rm --platform linux/arm64 docker.io/anriykalashnykov/arm64:latest /bin/sh
 	docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
 	docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
 

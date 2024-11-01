@@ -1,4 +1,5 @@
-FROM ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-builder AS builder
+#FROM ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-builder AS builder
+FROM andriykalashnykov/go-face-recognition:latest-builder AS builder
 
 # https://hub.docker.com/_/alpine/tags
 FROM alpine:3.20.3 AS runtime
@@ -6,6 +7,7 @@ FROM alpine:3.20.3 AS runtime
 WORKDIR /app
 
 COPY --from=builder /app/cmd/main .
+#COPY --from=builder /app/cmd/main-arm64 .
 
 COPY --from=builder /app/fonts fonts/
 COPY --from=builder /app/images/ images/

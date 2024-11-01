@@ -1,11 +1,25 @@
 # https://hub.docker.com/_/ubuntu/tags
 FROM amd64/ubuntu:24.10 AS builder
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update
-RUN apt-get install -y build-essential cmake curl
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y build-essential bash curl locales
+
+RUN dpkg --add-architecture arm64
+RUN dpkg --add-architecture armel
+RUN dpkg --add-architecture armhf
+
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
+    crossbuild-essential-arm64 \
+    crossbuild-essential-armel \
+    crossbuild-essential-armhf
+
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
 ## Install go-face dependencies
-RUN apt-get install -y --install-recommends \
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends \
     libdlib-dev \
     libopenblas-dev \
     libblas-dev \
@@ -40,10 +54,15 @@ COPY ./cmd/ cmd/
 COPY ./fonts fonts
 COPY ./persons persons
 
-ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
+#ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
 RUN /usr/local/go/bin/go mod download
-RUN CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+
+RUN GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" /usr/local/go/bin/go build --ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+
+#ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+#ENV PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
+#RUN GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" /usr/local/go/bin/go build --ldflags "-s -w -extldflags -static -extld=aarch64-linux-gnu-gcc" -tags "static netgo cgo static_build" -o cmd/main-arm64 cmd/main.go
 
 # Keep the container running
 CMD ["tail", "-f", "/dev/null"]
