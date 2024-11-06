@@ -2,6 +2,7 @@
 FROM amd64/ubuntu:24.10 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
+ENV DLIB_VERSION=19.24
 
 RUN apt-get update
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y build-essential bash curl locales
@@ -20,7 +21,6 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommend
 
 ## Install go-face dependencies
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends \
-    libdlib-dev \
     libopenblas-dev \
     libblas-dev \
     libblaspp-dev \
@@ -31,7 +31,16 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends 
     liblapack-dev \
     libjpeg-turbo8-dev \
     gfortran \
-    libgfortran5 libquadmath0-amd64-cross libquadrule-dev
+    libgfortran5 libquadmath0-amd64-cross libquadrule-dev \
+    libdlib-dev
+
+#RUN mkdir /dlib && cd /dlib && curl -sLO http://dlib.net/files/dlib-${DLIB_VERSION}.tar.bz2 && tar xf dlib-${DLIB_VERSION}.tar.bz2
+#RUN cd /dlib/dlib-${DLIB_VERSION} && mkdir build && cd build \
+#    && cmake .. && cmake -DDLIB_PNG_SUPPORT=ON -DDLIB_GIF_SUPPORT=ON -DDLIB_JPEG_SUPPORT=ON -DDLIB_NO_GUI_SUPPORT=ON .. \
+#    && cmake --build . --config Release \
+#    && make -j$(grep -c processor /proc/cpuinfo) \
+#    && make install \
+#    && rm -rf /dlib
 
 # https://hub.docker.com/_/golang/
 # Install Go
