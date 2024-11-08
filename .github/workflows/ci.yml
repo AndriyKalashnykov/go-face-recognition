@@ -79,7 +79,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.ubuntu.builder
-          platforms: linux/amd64
+          platforms: linux/amd64, linux/arm64
           push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta_builder.outputs.tags }}
@@ -156,7 +156,7 @@ jobs:
           with:
             context: .
             file: ./Dockerfile.alpine.runtme
-            platforms: linux/amd64
+            platforms: linux/amd64, linux/arm64
             push: ${{ github.ref_type == 'tag' }}
             provenance: false
             tags: ${{ steps.meta_runtime.outputs.tags }}
