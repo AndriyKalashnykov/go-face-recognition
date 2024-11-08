@@ -20,7 +20,7 @@ test: ## run tests
 
 .PHONY: build
 build: ## build golang binary
-	@go build cmd/main.go -ldflags "-X main.version=$(shell git describe --abbrev=0 --tags)" -o cmd/main
+	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" /usr/local/go/bin/go build --ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
 
 .PHONY: update
 update: ## update dependency packages to latest versions
