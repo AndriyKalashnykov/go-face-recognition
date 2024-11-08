@@ -54,48 +54,51 @@ The system enables effortless recognition of faces within images, empowering use
 
 ## Installation and Usage
 
-1. Clone this repository:
+### Clone this repository
 
 ```bash
 git clone https://github.com/AndriyKalashnykov/go-face-recognition.git
 ```
 
-2. Navigate to the project directory:
+### Navigate to the project directory:
 
 ```bash
 cd go-face-recognition
 ```
 
-3. Build the Docker image:
+### Build & Run Docker image
+
+#### amd64
 
 ```bash
-make bi
-make ri
-/app # ./main
-```
-
-5. Run the Docker image:
-
-```bash
-docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
-docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
-````
-
-in a console type:
-
-```bash
+make bi-amd64 ri-amd64
 uname -m
 ./main
 ```
 
-5. Run the Docker container:
+#### arm64
 
 ```bash
-docker compose up --build -d
-docker exec go-face-recognition ./main
+make bi-arm64 ri-arm64
+uname -m
+./main
 ```
 
-This will execute the project inside the Docker container and demonstrate facial recognition.
+### Download & Run the Docker image
+
+#### amd64
+```bash
+docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+uname -m
+./main
+````
+
+#### arm64
+```bash
+docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+uname -m
+./main
+````
 
 ## Project Structure
 
