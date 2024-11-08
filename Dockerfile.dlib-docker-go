@@ -30,7 +30,6 @@ ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
 RUN /usr/local/go/bin/go mod download
 RUN  CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
-#GOOS=linux GOARCH=arm64
 
 FROM alpine:3.20.3 AS runtime
 
