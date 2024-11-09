@@ -1,6 +1,8 @@
 FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0-amd64 AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
+ARG GO_VER="1.23.1"
+ARG DEBIAN_FRONTEND=noninteractive
+
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends libgfortran5 libquadmath0-amd64-cross libquadrule-dev
 
 # Set the working directory
@@ -22,14 +24,23 @@ COPY ./persons/ persons/
 
 # https://hub.docker.com/_/golang/
 # Install Go
-RUN curl -sLO https://go.dev/dl/go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && tar -C /usr/local -xzf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && rm -rf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
+RUN curl -sLO https://go.dev/dl/go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && tar -C /usr/local -xzf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && rm -rf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
 
 ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
 RUN /usr/local/go/bin/go mod download
-RUN  CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" /usr/local/go/bin/go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+
+RUN <<EOT
+    if [ "${TARGETARCH}" = "amd64" ]; then
+      export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas"
+    else
+      export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lblas -latlas"
+    fi
+    
+    CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath -ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+EOT
 
 FROM alpine:3.20.3 AS runtime
 

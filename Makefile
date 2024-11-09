@@ -32,22 +32,23 @@ release: ## create and push a new tag
 	@git push
 	@echo "Done."
 
-bootstrap: ## bootstrap build dblib image
+bootstrap: ## buildx bootstrap
 	docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
 	docker buildx inspect --bootstrap
 
-bi-amd64: ## build amd64 go-face-recognition Docker image
-	docker build --platform linux/amd64 -f Dockerfile.ubuntu.builder 		-t andriykalashnykov/go-face-recognition:latest-builder .
+bi-amd64: ## build amd64 image
+	docker build --platform linux/amd64 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.23.2  		-t andriykalashnykov/go-face-recognition:latest-builder .
 	docker build --platform linux/amd64 -f Dockerfile.alpine.runtme.local  -t andriykalashnykov/go-face-recognition:latest-runtime .
+	docker build --platform linux/amd64 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.23.2   -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
 
-ri-amd64: ## run arm64 go-face-recognition image
+ri-amd64: ## run arm64 image
 	docker run -it --rm --platform linux/amd64 andriykalashnykov/go-face-recognition:latest-runtime /bin/sh
 
-bi-arm64: ## build arm64 go-face-recognition Docker image
+bi-arm64: ## build arm64 image
 	docker build --platform linux/arm64 -f Dockerfile.ubuntu.builder 		-t andriykalashnykov/go-face-recognition:latest-builder .
 	docker build --platform linux/arm64 -f Dockerfile.alpine.runtme.local  -t andriykalashnykov/go-face-recognition:latest-runtime .
 
-ri-arm64: ## run arm64 go-face-recognition image
+ri-arm64: ## run arm64 image
 	docker run -it --rm --platform linux/arm64 andriykalashnykov/go-face-recognition:latest-runtime /bin/sh
 
 version: ## Print current version(tag)
