@@ -1,6 +1,7 @@
 # https://hub.docker.com/_/ubuntu/tags
 FROM ubuntu:24.10 AS builder
 
+ARG GO_VER="1.23.2"
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update
@@ -33,11 +34,12 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends 
     libgfortran5 libquadmath0-amd64-cross libquadrule-dev \
     libdlib-dev
 
+ENV GO_VER=$GO_VER
 # https://hub.docker.com/_/golang/
 # Install Go
-RUN curl -sLO https://go.dev/dl/go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && tar -C /usr/local -xzf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && rm -rf go1.23.2.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
+RUN curl -sLO https://go.dev/dl/go${GO_VER}.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && tar -C /usr/local -xzf go${GO_VER}.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
+    && rm -rf go${GO_VER}.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
 
 # Set the working directory
 WORKDIR /app
