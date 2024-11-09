@@ -16,8 +16,11 @@ jobs:
 
   docker-image-builder:
 
-    runs-on: ubuntu-latest
     name: docker-image-builder
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [ 1.23.2 ]
 
     steps:
 
@@ -80,6 +83,9 @@ jobs:
           context: .
           file: ./Dockerfile.ubuntu.builder
           platforms: linux/amd64, linux/arm64
+          build-args: |
+            OS_IMAGE=ubuntu:24.10
+            GO_VER=${{ matrix.go-version }}
           push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta_builder.outputs.tags }}
@@ -92,8 +98,8 @@ jobs:
 
   docker-image-runtime:
 
-      runs-on: ubuntu-latest
       name: docker-image-runtime
+      runs-on: ubuntu-latest
       needs: [ docker-image-builder ]
 
       steps:

@@ -1,7 +1,9 @@
-# https://hub.docker.com/_/ubuntu/tags
-FROM ubuntu:24.10 AS builder
+ARG OS_IMAGE="ubuntu:24.10"
 
-ARG GO_VER="1.23.1"
+# https://hub.docker.com/_/ubuntu/tags
+FROM ${OS_IMAGE} AS builder
+
+ARG GO_VER="1.23.2"
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update

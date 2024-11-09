@@ -1,6 +1,6 @@
 FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0-amd64 AS builder
 
-ARG GO_VER="1.23.1"
+ARG GO_VER="1.23.2"
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends libgfortran5 libquadmath0-amd64-cross libquadrule-dev
@@ -38,7 +38,7 @@ RUN <<EOT
     else
       export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lblas -latlas"
     fi
-    
+
     CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath -ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
 EOT
 
