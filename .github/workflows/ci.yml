@@ -14,9 +14,9 @@ permissions:
 
 jobs:
 
-  docker-image-builder:
+  docker-image:
 
-    name: docker-image-builder
+    name: docker-image
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -53,14 +53,13 @@ jobs:
           echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
           echo "Tag name from github.ref_name: ${{  github.ref_name }}"
 
-      - name: Docker builder meta
+      - name: Docker meta
         id: meta_builder
         uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
         with:
           images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
           flavor: |
-            latest=false
-            suffix=-builder
+            latest=true
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -68,24 +67,23 @@ jobs:
             type=semver,pattern=v{{version}}
           labels: |
             org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
-            org.opencontainers.image.title=Face recognition in Go with Dlib - amd64 builder
-            org.opencontainers.image.description=Face recognition in Go with Dlib - amd64 builder
+            org.opencontainers.image.title=Face recognition in Go with Dlib
+            org.opencontainers.image.description=Face recognition in Go with Dlib
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{  github.ref_name }}"
             io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
             io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
             io.artifacthub.package.license=MIT
 
-      - name: Build and push docker_builder
+      - name: Build and push
         id: docker_builder
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
         with:
           context: .
-          file: ./Dockerfile.ubuntu.builder
-          platforms: linux/amd64, linux/arm64
+          file: ./Dockerfile.go-face
+          platforms: linux/amd64, linux/arm64, linux/arm/v7
           build-args: |
-            OS_IMAGE=ubuntu:24.10
-            GO_VER=${{ matrix.go-version }}
+            BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.1
           push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta_builder.outputs.tags }}
@@ -96,79 +94,161 @@ jobs:
       - name: Output docker_builder image digest
         run: echo ${{ steps.docker_builder.outputs.digest }}
 
-  docker-image-runtime:
-
-      name: docker-image-runtime
-      runs-on: ubuntu-latest
-      needs: [ docker-image-builder ]
-
-      steps:
-
-        - name: Checkout code
-          uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-          with:
-            fetch-depth: 0
-
-        - name: Set up QEMU
-          uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
-
-        - name: Set up Docker Buildx
-          uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
-
-        - name: Convert owner to lower case
-          run: |
-            echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
-          env:
-            OWNER: '${{ github.repository_owner }}'
-
-        - name: Login to image repository
-          uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
-          with:
-            registry: ghcr.io
-            username: ${{ github.actor }}
-            password: ${{ secrets.GH_ACCESS_TOKEN }}
-
-        - name: GitHub Tag Name
-          run: |
-            echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
-            echo "Tag name from github.ref_name: ${{  github.ref_name }}"
-
-        - name: Docker runtime meta
-          id: meta_runtime
-          uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
-          with:
-            images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
-            flavor: |
-              latest=false
-              suffix=-runtime
-            tags: |
-              type=ref,event=branch
-              type=ref,event=tag
-              type=ref,event=pr
-              type=semver,pattern=v{{version}}
-            labels: |
-              org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
-              org.opencontainers.image.title=Face recognition in Go with Dlib - runtime
-              org.opencontainers.image.description=Face recognition in Go with Dlib - runtime
-              org.opencontainers.image.licenses=MIT
-              org.opencontainers.image.version=${{  github.ref_name }}"
-              io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
-              io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
-              io.artifacthub.package.license=MIT
-
-        - name: Build and push runtime
-          id: docker_runtime
-          uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
-          with:
-            context: .
-            file: ./Dockerfile.alpine.runtme
-            platforms: linux/amd64, linux/arm64
-            push: ${{ github.ref_type == 'tag' }}
-            provenance: false
-            tags: ${{ steps.meta_runtime.outputs.tags }}
-            labels: ${{ steps.meta_runtime.outputs.labels }}
-            cache-from: type=gha
-            cache-to: type=gha,mode=max
-
-        - name: Output docker_builder image digest
-          run: echo ${{ steps.docker_runtime.outputs.digest }}
+#  docker-image-builder:
+#
+#    name: docker-image-builder
+#    runs-on: ubuntu-latest
+#    strategy:
+#      matrix:
+#        go-version: [ 1.23.2 ]
+#
+#    steps:
+#
+#      - name: Checkout code
+#        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+#        with:
+#          fetch-depth: 0
+#
+#      - name: Set up QEMU
+#        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+#
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+#
+#      - name: Convert owner to lower case
+#        run: |
+#          echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+#        env:
+#          OWNER: '${{ github.repository_owner }}'
+#
+#      - name: Login to image repository
+#        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+#        with:
+#          registry: ghcr.io
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GH_ACCESS_TOKEN }}
+#
+#      - name: GitHub Tag Name
+#        run: |
+#          echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
+#          echo "Tag name from github.ref_name: ${{  github.ref_name }}"
+#
+#      - name: Docker builder meta
+#        id: meta_builder
+#        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
+#        with:
+#          images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
+#          flavor: |
+#            latest=false
+#            suffix=-builder
+#          tags: |
+#            type=ref,event=branch
+#            type=ref,event=tag
+#            type=ref,event=pr
+#            type=semver,pattern=v{{version}}
+#          labels: |
+#            org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
+#            org.opencontainers.image.title=Face recognition in Go with Dlib - amd64 builder
+#            org.opencontainers.image.description=Face recognition in Go with Dlib - amd64 builder
+#            org.opencontainers.image.licenses=MIT
+#            org.opencontainers.image.version=${{  github.ref_name }}"
+#            io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
+#            io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
+#            io.artifacthub.package.license=MIT
+#
+#      - name: Build and push docker_builder
+#        id: docker_builder
+#        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+#        with:
+#          context: .
+#          file: ./Dockerfile.ubuntu.builder
+#          platforms: linux/amd64, linux/arm64
+#          build-args: |
+#            OS_IMAGE=ubuntu:24.10
+#            GO_VER=${{ matrix.go-version }}
+#          push: ${{ github.ref_type == 'tag' }}
+#          provenance: false
+#          tags: ${{ steps.meta_builder.outputs.tags }}
+#          labels: ${{ steps.meta_builder.outputs.labels }}
+#          cache-from: type=gha
+#          cache-to: type=gha,mode=max
+#
+#      - name: Output docker_builder image digest
+#        run: echo ${{ steps.docker_builder.outputs.digest }}
+#
+#  docker-image-runtime:
+#
+#      name: docker-image-runtime
+#      runs-on: ubuntu-latest
+#      needs: [ docker-image-builder ]
+#
+#      steps:
+#
+#        - name: Checkout code
+#          uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+#          with:
+#            fetch-depth: 0
+#
+#        - name: Set up QEMU
+#          uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3
+#
+#        - name: Set up Docker Buildx
+#          uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+#
+#        - name: Convert owner to lower case
+#          run: |
+#            echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+#          env:
+#            OWNER: '${{ github.repository_owner }}'
+#
+#        - name: Login to image repository
+#          uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+#          with:
+#            registry: ghcr.io
+#            username: ${{ github.actor }}
+#            password: ${{ secrets.GH_ACCESS_TOKEN }}
+#
+#        - name: GitHub Tag Name
+#          run: |
+#            echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
+#            echo "Tag name from github.ref_name: ${{  github.ref_name }}"
+#
+#        - name: Docker runtime meta
+#          id: meta_runtime
+#          uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
+#          with:
+#            images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
+#            flavor: |
+#              latest=false
+#              suffix=-runtime
+#            tags: |
+#              type=ref,event=branch
+#              type=ref,event=tag
+#              type=ref,event=pr
+#              type=semver,pattern=v{{version}}
+#            labels: |
+#              org.opencontainers.image.vendor=Andriy Kalashnykov - andriykalashnykov@gmail.com
+#              org.opencontainers.image.title=Face recognition in Go with Dlib - runtime
+#              org.opencontainers.image.description=Face recognition in Go with Dlib - runtime
+#              org.opencontainers.image.licenses=MIT
+#              org.opencontainers.image.version=${{  github.ref_name }}"
+#              io.artifacthub.package.readme-url=https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md
+#              io.artifacthub.package.maintainers=[{\"name\":\"Andriy Kalashnykov\",\"email\":\"andriykalashnykov@gmail.com\"}]
+#              io.artifacthub.package.license=MIT
+#
+#        - name: Build and push runtime
+#          id: docker_runtime
+#          uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6
+#          with:
+#            context: .
+#            file: ./Dockerfile.alpine.runtme
+#            platforms: linux/amd64, linux/arm64
+#            push: ${{ github.ref_type == 'tag' }}
+#            provenance: false
+#            tags: ${{ steps.meta_runtime.outputs.tags }}
+#            labels: ${{ steps.meta_runtime.outputs.labels }}
+#            cache-from: type=gha
+#            cache-to: type=gha,mode=max
+#
+#        - name: Output docker_builder image digest
+#          run: echo ${{ steps.docker_runtime.outputs.digest }}

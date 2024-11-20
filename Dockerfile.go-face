@@ -1,4 +1,6 @@
-FROM ghcr.io/andriykalashnykov/dlib-docker:v19.24.0-amd64 AS builder
+ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/go-face:v0.0.1"
+
+FROM ${BUILDER_IMAGE} AS builder
 
 # Set the working directory
 WORKDIR /app
@@ -17,11 +19,19 @@ COPY ./images/ images/
 COPY ./models/ models/
 COPY ./persons/ persons/
 
-# Assuming Go is installed by GitHub action
 ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
 
-RUN go mod download
-RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas" go build -ldflags "-s -w -extldflags -static" -tags static -o cmd/main cmd/main.go
+RUN <<EOT
+    if [ "${TARGETARCH}" = "amd64" ]; then
+      apt install -y libquadmath0;
+      export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas"
+    else
+      export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lblas -latlas"
+    fi
+
+    /usr/local/go/bin/go mod download
+    CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath -ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+EOT
 
 FROM alpine:3.20.3 AS runtime
 

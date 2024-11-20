@@ -1,25 +1,38 @@
-ARG OS_IMAGE="ubuntu:24.10"
+ARG BUILDER_IMAGE="ubuntu:24.10"
 
 # https://hub.docker.com/_/ubuntu/tags
-FROM ${OS_IMAGE} AS builder
+FROM ${BUILDER_IMAGE} AS builder
 
 ARG GO_VER="1.23.2"
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y cmake build-essential bash curl locales
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y cmake build-essential bash curl wget locales ca-certificates net-tools
 
-RUN dpkg --add-architecture arm64
-RUN dpkg --add-architecture armel
-RUN dpkg --add-architecture armhf
+RUN <<EOT
+    if [ "${TARGETARCH}" == "amd64" ] || [ "${TARGETARCH}" == "arm64" ]; then
 
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
-    crossbuild-essential-arm64 \
-    crossbuild-essential-armel \
-    crossbuild-essential-armhf
+        dpkg --add-architecture arm64
+        dpkg --add-architecture armel
+        dpkg --add-architecture armhf
 
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
-    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --no-install-recommends \
+            crossbuild-essential-arm64 \
+            crossbuild-essential-armel \
+            crossbuild-essential-armhf
+
+        DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --no-install-recommends \
+            libapparmor-dev:arm64 \
+            libapparmor-dev:armel \
+            libapparmor-dev:armhf \
+            libseccomp-dev:arm64 \
+            libseccomp-dev:armel \
+            libseccomp-dev:armhf
+    fi
+EOT
+
+#RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recommends \
+#    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
 ## Install go-face dependencies
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends \
@@ -33,8 +46,12 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends 
     liblapack-dev \
     libjpeg-turbo8-dev \
     gfortran \
-    libgfortran5 libquadmath0-amd64-cross libquadrule-dev \
-    libdlib-dev
+    libgfortran5  \
+    libdlib-dev \
+
+# libquadmath0-amd64-cross libquadrule-dev
+
+# https://launchpad.net/ubuntu/oracular/+package/libdlib-dev
 
 # https://hub.docker.com/_/golang/
 # Install Go
