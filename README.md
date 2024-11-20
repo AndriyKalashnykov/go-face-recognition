@@ -71,7 +71,8 @@ cd go-face-recognition
 #### amd64
 
 ```bash
-make bi-amd64 ri-amd64
+docker buildx build --load --platform linux/amd64 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.1 -t andriykalashnykov/go-face-recognition:latest-go-face .
+docker run -it --rm --platform linux/amd64 andriykalashnykov/go-face-recognition:latest-go-face /bin/sh
 uname -m
 ./main
 ```
@@ -79,7 +80,17 @@ uname -m
 #### arm64
 
 ```bash
-make bi-arm64 ri-arm64
+docker buildx build --load --platform linux/arm64 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.1 -t andriykalashnykov/go-face-recognition:latest-go-face .
+docker run -it --rm --platform linux/arm64 andriykalashnykov/go-face-recognition:latest-go-face /bin/sh
+uname -m
+./main
+```
+
+#### arm/v7
+
+```bash
+docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.1 -t andriykalashnykov/go-face-recognition:latest-go-face .
+docker run -it --rm --platform linux/arm/v7 andriykalashnykov/go-face-recognition:latest-go-face /bin/sh
 uname -m
 ./main
 ```
@@ -88,14 +99,21 @@ uname -m
 
 #### amd64
 ```bash
-docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1 /bin/sh
 uname -m
 ./main
 ````
 
 #### arm64
 ```bash
-docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1-runtime /bin/sh
+docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1 /bin/sh
+uname -m
+./main
+````
+
+#### arm/v7
+```bash
+docker run -it --rm --platform linux/arm/v7 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.1 /bin/sh
 uname -m
 ./main
 ````
