@@ -3,7 +3,7 @@ ARG BUILDER_IMAGE="ubuntu:oracular-20250619@sha256:cdf755952ed117f6126ff4e65810b
 # https://hub.docker.com/_/ubuntu/tags
 FROM ${BUILDER_IMAGE} AS builder
 
-ARG GO_VER="1.23.2"
+ARG GO_VER=1.25.0
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update
@@ -35,7 +35,7 @@ EOT
 #    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
 ## Install go-face dependencies
-RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends \
+RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --install-recommends \
     libopenblas-dev \
     libblas-dev \
     libblaspp-dev \
@@ -47,7 +47,7 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends 
     libjpeg-turbo8-dev \
     gfortran \
     libgfortran5  \
-    libdlib-dev \
+    libdlib-dev
 
 # libquadmath0-amd64-cross libquadrule-dev
 
@@ -55,9 +55,10 @@ RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND}  apt-get install -y --install-recommends 
 
 # https://hub.docker.com/_/golang/
 # Install Go
-RUN curl -sLO https://go.dev/dl/go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && tar -C /usr/local -xzf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && rm -rf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
+ADD "https://www.random.org/cgi-bin/randbyte?nbytes=10&format=h" skipcache
+RUN curl -sLO https://go.dev/dl/go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?\(v7l\)\?.*/\1\2\3/' -e 's/aarch64$/arm64/' -e 's/armv7l$/armv6l/').tar.gz \
+    && tar -C /usr/local -xzf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?\(v7l\)\?.*/\1\2\3/' -e 's/aarch64$/arm64/' -e 's/armv7l$/armv6l/').tar.gz \
+    && rm -rf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?\(v7l\)\?.*/\1\2\3/' -e 's/aarch64$/arm64/' -e 's/armv7l$/armv6l/').tar.gz
 
 # Set the working directory
 WORKDIR /app

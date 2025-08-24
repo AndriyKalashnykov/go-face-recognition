@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [ 1.23.2 ]
+        go-version: [ 1.25.0 ]
 
     steps:
 
@@ -100,7 +100,7 @@ jobs:
 #    runs-on: ubuntu-latest
 #    strategy:
 #      matrix:
-#        go-version: [ 1.23.2 ]
+#        go-version: [ 1.25.0 ]
 #
 #    steps:
 #

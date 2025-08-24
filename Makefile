@@ -38,10 +38,10 @@ bootstrap: ## buildx bootstrap
 
 bi: ## build image
 	docker buildx use multi-platform-builder
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.23.2  -t andriykalashnykov/go-face-recognition:latest-builder .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.25.0  -t andriykalashnykov/go-face-recognition:latest-builder .
 	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.alpine.runtme.local -t andriykalashnykov/go-face-recognition:latest-runtime .
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.23.2 -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg GO_VER=1.23.2 -t andriykalashnykov/go-face-recognition:latest-go-face .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.25.0 -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg GO_VER=1.25.0 -t andriykalashnykov/go-face-recognition:latest-go-face .
 
 ri: ## run image
 	docker run -it --rm --platform linux/arm/v7 andriykalashnykov/go-face-recognition:latest-runtime /bin/sh
