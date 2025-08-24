@@ -37,6 +37,7 @@ Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/ab
 
 - **Easy Deployment with Docker:** To streamline dependency management and deployment, the project is encapsulated within a Docker environment, ensuring seamless integration into any development or production environment.
 
+This project relies on own Docker image of DLib - [dlib-docker](https://github.com/AndriyKalashnykov/dlib-docker)
 ## Usage
 
 ### Dynamic Loading of People
