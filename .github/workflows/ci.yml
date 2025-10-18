@@ -18,9 +18,6 @@ jobs:
 
     name: docker-image
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: [ 1.25.0 ]
 
     steps:
 
@@ -83,7 +80,7 @@ jobs:
           file: ./Dockerfile.go-face
           platforms: linux/amd64, linux/arm64, linux/arm/v7
           build-args: |
-            BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.1
+            BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.2
           push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta_builder.outputs.tags }}
