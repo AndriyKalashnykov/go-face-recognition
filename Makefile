@@ -75,5 +75,5 @@ ra-arm64:
 
 dt:
 	rm -f version.txt
-	git push --delete origin v0.0.1
-	git tag --delete v0.0.1
+	git push --delete origin v0.0.2
+	git tag --delete v0.0.2
