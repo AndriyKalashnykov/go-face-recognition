@@ -7,4 +7,4 @@ require (
 	golang.org/x/image v0.32.0
 )
 
-require github.com/AndriyKalashnykov/go-face v0.0.1
+require github.com/AndriyKalashnykov/go-face v0.0.2
