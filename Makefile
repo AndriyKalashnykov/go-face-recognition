@@ -15,8 +15,14 @@ test: ## run tests
 	go test --cover -parallel=1 -v -coverprofile=coverage.out -v ./...
 	go tool cover -func=coverage.out | sort -rnk3
 
-build: ## build golang binary
+build: ## build golang binary for Linux amd64
 	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" go build --ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+
+build-macos: ## build golang binary natively for macOS
+	@CGO_ENABLED=1 \
+	CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
+	CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib -ldlib -lopenblas" \
+	go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
 update: ## update dependency packages to latest versions
 	@go get -u ./...; go mod tidy

@@ -122,6 +122,36 @@ uname -m
 ./main
 ````
 
+### Building on MacOS
+
+Install OpenBLAS etc: 
+
+```bash
+brew tap messense/macos-cross-toolchains
+brew install aarch64-unknown-linux-musl
+brew install messense/macos-cross-toolchains/aarch64-unknown-linux-gnu
+brew link openblas 2>&1
+```
+
+Install dlib:
+```bash
+brew install cmake
+git clone https://github.com/davisking/dlib.git
+cd dlib
+mkdir build
+cd build
+cmake ..
+cmake --build . --config Release
+sudo make install
+```
+
+run the following command:
+
+```bash
+make build-macos
+./cmd/main
+```
+
 ## Project Structure
 
 The `images/` directory contains the input and output images. The `persons/` directory contains sub-folders for each person, with images of that person to be used in the model. The `models/` directory contains the trained model for facial recognition. The `internal/` directory contains the core logic of the system, including entities and use cases. The `cmd/` directory contains the main entry point of the system.
