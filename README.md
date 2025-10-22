@@ -148,7 +148,7 @@ sudo make install
 run the following command:
 
 ```bash
-make build-macos
+make build-arm64
 ./cmd/main
 ```
 

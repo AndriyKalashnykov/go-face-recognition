@@ -18,7 +18,7 @@ test: ## run tests
 build: ## build golang binary for Linux amd64
 	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" go build --ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
 
-build-macos: ## build golang binary natively for macOS
+build-arm64: ## build golang binary natively for macOS
 	@CGO_ENABLED=1 \
 	CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
 	CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib -ldlib -lopenblas" \

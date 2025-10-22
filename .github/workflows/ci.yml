@@ -33,8 +33,9 @@ jobs:
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
 
       - name: Convert owner to lower case
+        shell: bash
         run: |
-          echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+          echo "OWNER_LC=$(echo ${OWNER} | tr '[:upper:]' '[:lower:]')" >>${GITHUB_ENV}
         env:
           OWNER: '${{ github.repository_owner }}'
 
@@ -45,10 +46,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GH_ACCESS_TOKEN }}
 
-      - name: GitHub Tag Name
-        run: |
-          echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
-          echo "Tag name from github.ref_name: ${{  github.ref_name }}"
+#      - name: GitHub Tag Name
+#        run: |
+#          echo "Tag name from GITHUB_REF_NAME: $GITHUB_REF_NAME"
+#          echo "Tag name from github.ref_name: ${{  github.ref_name }}"
 
       - name: Docker meta
         id: meta_builder
@@ -88,8 +89,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Output docker_builder image digest
-        run: echo ${{ steps.docker_builder.outputs.digest }}
+#      - name: Output docker_builder image digest
+#        run: echo ${{ steps.docker_builder.outputs.digest }}
 
 #  docker-image-builder:
 #
