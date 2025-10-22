@@ -103,21 +103,27 @@ uname -m
 
 #### amd64
 ```bash
-docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2 /bin/sh
+IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2
+docker pull $IMG
+docker run -it --rm --platform linux/amd64 $IMG /bin/sh
 uname -m
 ./main
 ````
 
 #### arm64
 ```bash
-docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2 /bin/sh
+IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2
+docker pull $IMG
+docker run -it --rm --platform linux/arm64 $IMG /bin/sh
 uname -m
 ./main
 ````
 
 #### arm/v7
 ```bash
-docker run -it --rm --platform linux/arm/v7 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2 /bin/sh
+IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2
+docker pull $IMG
+docker run -it --rm --platform linux/arm/v7 $IMG /bin/sh
 uname -m
 ./main
 ````
