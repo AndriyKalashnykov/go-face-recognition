@@ -21,7 +21,9 @@ build: ## build golang binary for Linux amd64
 build-arm64: ## build golang binary natively for macOS
 	@CGO_ENABLED=1 \
 	CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
-	CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib -ldlib -lopenblas" \
+	CGO_CFLAGS="-Wno-pessimizing-move -Wno-unused-but-set-variable" \
+	CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib" \
+	GOARCH=arm64 \
 	go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
 update: ## update dependency packages to latest versions
