@@ -1,4 +1,4 @@
-ARG BUILDER_IMAGE="ubuntu:oracular-20250619@sha256:cdf755952ed117f6126ff4e65810bf93767d4c38f5c7185b50ec1f1078b464cc"
+ARG BUILDER_IMAGE="ubuntu:noble-20260113"
 
 # https://hub.docker.com/_/ubuntu/tags
 FROM ${BUILDER_IMAGE} AS builder

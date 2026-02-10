@@ -2,69 +2,39 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:best-practices",
-    ":approveMajorUpdates",
-    ":label(dependencies)",
+    ":dependencyDashboard",
     ":semanticCommitType(chore)",
+    ":label(dependencies)",
     "docker:pinDigests",
     "helpers:pinGitHubActionDigests",
-    ":dependencyDashboard",
-    ":automergePatch",
-    ":automergePr",
+    ":automergeAll",
     ":automergeRequireAllStatusChecks",
     ":prConcurrentLimitNone",
-    ":separatePatchReleases",
     "replacements:all",
     "workarounds:all"
   ],
-  "postUpdateOptions": [
-    "gomodTidy"
-  ],
+  "postUpdateOptions": ["gomodTidy"],
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
   "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",
   "platformAutomerge": true,
-  "prConcurrentLimit": 0,
   "prHourlyLimit": 0,
-  "groupName": "all",
-  "labels": [
-    "dependencies"
-  ],
+  "rebaseWhen": "behind-base-branch",
+  "schedule": ["before 5am on monday"],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true
+  },
   "packageRules": [
     {
-      "description": "Automerge major updates",
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
+      "description": "Group Go dependencies",
+      "matchManagers": ["gomod"],
+      "groupName": "go dependencies"
     },
     {
-      "description": "Automerge non-major updates",
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin",
-        "pinDigest",
-        "internal",
-        "devDependencies",
-        "ref",
-        "none",
-        "security",
-        "grop",
-        "unpin"
-      ],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Automerge github-actions updates",
+      "description": "Group GitHub Actions",
       "matchManagers": ["github-actions"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
+      "groupName": "github actions"
     }
   ]
 }

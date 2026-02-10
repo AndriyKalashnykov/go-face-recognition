@@ -46,10 +46,10 @@ bootstrap: ## buildx bootstrap
 
 bi: ## build image
 	docker buildx use multi-platform-builder
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg GO_VER=1.25.3 -t andriykalashnykov/go-face-recognition:latest-go-face .
-#	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.25.3  -t andriykalashnykov/go-face-recognition:latest-builder .
-#	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.alpine.runtme.local -t andriykalashnykov/go-face-recognition:latest-runtime .
-#	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.25.3 -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg GO_VER=1.25.7 -t andriykalashnykov/go-face-recognition:latest-go-face .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.25.7  -t andriykalashnykov/go-face-recognition:latest-builder .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.alpine.runtme.local -t andriykalashnykov/go-face-recognition:latest-runtime .
+	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.25.7 -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
 
 
 ri: ## run image
@@ -76,12 +76,12 @@ sd:
 # aarch64
 
 ra-amd64:
-	docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2-runtime /bin/sh
+	docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
 
 ra-arm64:
-	docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.2-runtime /bin/sh
+	docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
 
 dt:
 	rm -f version.txt
-	git push --delete origin v0.0.2
-	git tag --delete v0.0.2
+	git push --delete origin v0.0.3
+	git tag --delete v0.0.3
