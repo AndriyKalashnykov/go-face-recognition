@@ -1,4 +1,4 @@
-ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/go-face:v0.0.2@sha256:6af2825759a1c17d2f7ef96ff7c9041e34090f58c6a36723c08ea5e166eab46d"
+ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/go-face:v0.0.3@sha256:0464333db38ddfd2df24e3e2352cb0cad8f7c4c3d5d9b40410eac1edf18690d5"
 
 FROM ${BUILDER_IMAGE} AS builder
 
