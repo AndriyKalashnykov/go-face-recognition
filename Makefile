@@ -1,87 +1,155 @@
-projectname?=go-face-recognition
+# ──────────────────────────────────────────────────────────────
+# Tool versions (pinned)
+# ──────────────────────────────────────────────────────────────
+GO_VER          ?= 1.25.7
+DOCKER_PLATFORM ?= linux/arm/v7
+BUILDER_IMAGE   ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
+IMAGE_REPO      ?= andriykalashnykov/go-face-recognition
 
-CURRENTTAG:=$(shell git describe --tags --abbrev=0)
-NEWTAG ?= $(shell bash -c 'read -p "Please provide a new tag (currnet tag - ${CURRENTTAG}): " newtag; echo $$newtag')
+# ──────────────────────────────────────────────────────────────
+# Project metadata
+# ──────────────────────────────────────────────────────────────
+projectname     ?= go-face-recognition
+CURRENTTAG      := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+NEWTAG          ?= $(shell bash -c 'read -p "Please provide a new tag (current tag - $(CURRENTTAG)): " newtag; echo $$newtag')
+SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 
-default: help
+.DEFAULT_GOAL := help
 
-help: ## list makefile targets
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-10s\033[0m %s\n", $$1, $$2}'
+# ──────────────────────────────────────────────────────────────
+# Targets
+# ──────────────────────────────────────────────────────────────
 
-testdata: ## get test data
-	git clone https://github.com/Kagami/go-face-testdata testdatas
+.PHONY: help deps clean testdata test build build-arm64 lint run update \
+        release bootstrap image-build image-run version docker-prune \
+        docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 tag-delete ci
 
-test: ## run tests
-	go test --cover -parallel=1 -v -coverprofile=coverage.out -v ./...
-	go tool cover -func=coverage.out | sort -rnk3
+#help: @ List available targets
+help:
+	@grep -E '^#[a-zA-Z0-9_-]+:.*@' $(MAKEFILE_LIST) | sort | sed 's/^#//' | awk 'BEGIN {FS = ": *@ *"}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
-build: ## build golang binary for Linux amd64
-	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ CGO_ENABLED=1 CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" go build --ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+#deps: @ Verify required tool dependencies
+deps:
+	@command -v go   >/dev/null 2>&1 || { echo "ERROR: go is not installed";   exit 1; }
+	@command -v git  >/dev/null 2>&1 || { echo "ERROR: git is not installed";  exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed"; exit 1; }
+	@echo "All dependencies satisfied."
 
-build-arm64: ## build golang binary natively for macOS
+#clean: @ Remove build artifacts and generated files
+clean:
+	@rm -rf cmd/main coverage.out testdatas version.txt
+	@echo "Cleaned build artifacts."
+
+#testdata: @ Clone test data repository
+testdata:
+	@git clone https://github.com/Kagami/go-face-testdata testdatas
+
+#test: @ Run tests with coverage
+test:
+	@go test --cover -parallel=1 -v -coverprofile=coverage.out -v ./...
+	@go tool cover -func=coverage.out | sort -rnk3
+
+#build: @ Build Go binary for Linux amd64
+build:
+	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ \
+		CGO_ENABLED=1 \
+		CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" \
+		go build --ldflags "-s -w -extldflags -static" \
+		-tags "static netgo cgo static_build" \
+		-o cmd/main cmd/main.go
+
+#build-arm64: @ Build Go binary natively for macOS arm64
+build-arm64:
 	@CGO_ENABLED=1 \
-	CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
-	CGO_CFLAGS="-Wno-pessimizing-move -Wno-unused-but-set-variable" \
-	CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib" \
-	GOARCH=arm64 \
-	go build --ldflags "-s -w" -o cmd/main cmd/main.go
+		CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
+		CGO_CFLAGS="-Wno-pessimizing-move -Wno-unused-but-set-variable" \
+		CGO_LDFLAGS="-L/opt/homebrew/lib -L/opt/homebrew/opt/openblas/lib -L/usr/local/lib" \
+		GOARCH=arm64 \
+		go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
-update: ## update dependency packages to latest versions
-	@go get -u ./...; go mod tidy
+#lint: @ Run Go linters
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "ERROR: golangci-lint is not installed"; exit 1; }
+	@golangci-lint run ./...
 
-release: ## create and push a new tag
+#run: @ Run the application locally
+run:
+	@go run cmd/main.go
+
+#update: @ Update dependency packages to latest versions
+update:
+	@go get -u ./...
+	@go mod tidy
+
+#release: @ Create and push a new semver tag
+release:
 	$(eval NT=$(NEWTAG))
-	@echo -n "Are you sure to create and push ${NT} tag? [y/N] " && read ans && [ $${ans:-N} = y ]
-	@echo ${NT} > ./version.txt
+	@if ! echo "$(NT)" | grep -qE '$(SEMVER_REGEX)'; then \
+		echo "ERROR: '$(NT)' is not valid semver (expected vX.Y.Z)"; \
+		exit 1; \
+	fi
+	@echo -n "Are you sure to create and push $(NT) tag? [y/N] " && read ans && [ $${ans:-N} = y ]
+	@echo $(NT) > ./version.txt
 	@git add -A
-	@git commit -a -s -m "Cut ${NT} release"
-	@git tag ${NT}
-	@git push origin ${NT}
+	@git commit -a -s -m "Cut $(NT) release"
+	@git tag $(NT)
+	@git push origin $(NT)
 	@git push
 	@echo "Done."
 
-bootstrap: ## buildx bootstrap
-	docker buildx create --use --platform=linux/arm64,linux/amd64,linux/arm/v7 --name multi-platform-builder
-	docker buildx inspect --bootstrap
+#bootstrap: @ Create Docker buildx multi-platform builder
+bootstrap:
+	@docker buildx create --use --platform=linux/arm64,linux/amd64,linux/arm/v7 --name multi-platform-builder
+	@docker buildx inspect --bootstrap
 
-bi: ## build image
-	docker buildx use multi-platform-builder
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg GO_VER=1.25.7 -t andriykalashnykov/go-face-recognition:latest-go-face .
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.ubuntu.builder --build-arg GO_VER=1.25.7  -t andriykalashnykov/go-face-recognition:latest-builder .
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.alpine.runtme.local -t andriykalashnykov/go-face-recognition:latest-runtime .
-	docker buildx build --load --platform linux/arm/v7 -f Dockerfile.dlib-docker-go --build-arg GO_VER=1.25.7 -t andriykalashnykov/go-face-recognition:latest-dlib-docker-go .
+#image-build: @ Build Docker images via buildx
+image-build:
+	@docker buildx use multi-platform-builder
+	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.go-face \
+		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-go-face .
+	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.ubuntu.builder \
+		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-builder .
+	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.alpine.runtme.local \
+		-t $(IMAGE_REPO):latest-runtime .
+	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.dlib-docker-go \
+		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-dlib-docker-go .
 
+#image-run: @ Run Docker images interactively
+image-run:
+	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-runtime /bin/sh
+	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-go-face /bin/sh
 
-ri: ## run image
-	docker run -it --rm --platform linux/arm/v7 andriykalashnykov/go-face-recognition:latest-runtime /bin/sh
-	docker run -it --rm --platform linux/arm/v7 andriykalashnykov/go-face-recognition:latest-go-face /bin/sh
+#version: @ Print current version (tag)
+version:
+	@echo $(CURRENTTAG)
 
-version: ## Print current version(tag)
-	@echo $(shell git describe --tags --abbrev=0)
+#docker-prune: @ Prune Docker system and buildx cache
+docker-prune:
+	@docker system prune
+	@docker buildx prune
 
-dp:
-	docker system prune
-	docker buildx prune
-
-# setup Docker to run arm64 images on Ubuntu x86_64
+# Setup Docker to run arm64 images on Ubuntu x86_64
 # https://jkfran.com/running-ubuntu-arm-with-docker/
 # https://www.stereolabs.com/docs/docker/building-arm-container-on-x86
-# https://github.com/carlosperate/arm-none-eabi-gcc-action
-# https://embeddedinventor.com/a-complete-beginners-guide-to-the-gnu-arm-toolchain-part-1/
-# export PATH=/path/to/install/dir/bin:$PATH
-sd:
-	docker run --privileged --rm tonistiigi/binfmt --install all
-	docker run -it --rm --platform linux/arm64 arm64v8/ubuntu sh
-# uname -m
-# aarch64
+#docker-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
+docker-setup-multiarch:
+	@docker run --privileged --rm tonistiigi/binfmt --install all
+	@docker run -it --rm --platform linux/arm64 arm64v8/ubuntu sh
 
-ra-amd64:
-	docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
+#run-ghcr-amd64: @ Run GHCR runtime image on amd64
+run-ghcr-amd64:
+	@docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
 
-ra-arm64:
-	docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
+#run-ghcr-arm64: @ Run GHCR runtime image on arm64
+run-ghcr-arm64:
+	@docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
 
-dt:
-	rm -f version.txt
-	git push --delete origin v0.0.3
-	git tag --delete v0.0.3
+#tag-delete: @ Delete a specific tag locally and remotely
+tag-delete:
+	@rm -f version.txt
+	@git push --delete origin v0.0.3
+	@git tag --delete v0.0.3
+
+#ci: @ Run the full CI pipeline locally (deps, lint, test)
+ci: deps lint test
+	@echo "CI pipeline passed."
