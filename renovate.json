@@ -2,39 +2,42 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:best-practices",
-    ":dependencyDashboard",
-    ":semanticCommitType(chore)",
-    ":label(dependencies)",
-    "docker:pinDigests",
-    "helpers:pinGitHubActionDigests",
-    ":automergeAll",
-    ":automergeRequireAllStatusChecks",
-    ":prConcurrentLimitNone",
-    "replacements:all",
-    "workarounds:all"
+    ":semanticCommitType(chore)"
   ],
   "postUpdateOptions": ["gomodTidy"],
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
   "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",
-  "platformAutomerge": true,
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 50,
   "prHourlyLimit": 0,
+  "platformAutomerge": true,
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "ignoreTests": false,
   "rebaseWhen": "behind-base-branch",
-  "schedule": ["before 5am on monday"],
   "vulnerabilityAlerts": {
     "labels": ["security"],
-    "automerge": true
+    "automerge": true,
+    "minimumReleaseAge": "0 days"
   },
   "packageRules": [
     {
-      "description": "Group Go dependencies",
-      "matchManagers": ["gomod"],
-      "groupName": "go dependencies"
+      "description": "Wait 3 days before automerging major updates",
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "3 days"
     },
     {
-      "description": "Group GitHub Actions",
+      "description": "Group GitHub Actions into one PR",
       "matchManagers": ["github-actions"],
-      "groupName": "github actions"
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Bump Go version in go.mod to latest patch",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "rangeStrategy": "bump"
     }
   ]
 }

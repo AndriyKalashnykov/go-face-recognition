@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────────────────────
 # Tool versions (pinned)
 # ──────────────────────────────────────────────────────────────
+NVM_VERSION     ?= 0.40.4
 GO_VER          ?= 1.25.7
 DOCKER_PLATFORM ?= linux/arm/v7
 BUILDER_IMAGE   ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
@@ -22,7 +23,8 @@ SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 
 .PHONY: help deps clean testdata test build build-arm64 lint run update \
         release bootstrap image-build image-run version docker-prune \
-        docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 tag-delete ci
+        docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 tag-delete ci \
+        renovate-bootstrap renovate-validate
 
 #help: @ List available targets
 help:
@@ -153,3 +155,17 @@ tag-delete:
 #ci: @ Run the full CI pipeline locally (deps, lint, test)
 ci: deps lint test
 	@echo "CI pipeline passed."
+
+#renovate-bootstrap: @ Install nvm and npm for Renovate
+renovate-bootstrap:
+	@command -v node >/dev/null 2>&1 || { \
+		echo "Installing nvm $(NVM_VERSION)..."; \
+		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$(NVM_VERSION)/install.sh | bash; \
+		export NVM_DIR="$$HOME/.nvm"; \
+		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
+		nvm install --lts; \
+	}
+
+#renovate-validate: @ Validate Renovate configuration
+renovate-validate: renovate-bootstrap
+	@npx --yes renovate --platform=local
