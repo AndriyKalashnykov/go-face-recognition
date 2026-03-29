@@ -1,43 +1,92 @@
+[![CI](https://github.com/AndriyKalashnykov/go-face-recognition/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AndriyKalashnykov/go-face-recognition/actions/workflows/ci.yml)
 [![Hits](https://hits.sh/github.com/AndriyKalashnykov/go-face-recognition.svg?view=today-total&style=plastic)](https://hits.sh/github.com/AndriyKalashnykov/go-face-recognition/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 [![Renovate enabled](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://app.renovatebot.com/dashboard#github/AndriyKalashnykov/go-face-recognition)
-# go-face-recognition
 
-Go-Face-Recognition is an facial recognition system, based on the principles of FaceNet and developed entirely in Go language. It leverages cutting-edge technology and utilizes the go-face library, which is built upon the powerful dlib C++ library for high-performance facial analysis.
+# Go Face Recognition
 
-## Table of Contents
+Facial recognition system built in Go, based on FaceNet principles. Uses the [go-face](https://github.com/AndriyKalashnykov/go-face) library (backed by [dlib](http://dlib.net/) C++) for face detection and recognition. Dockerized for multi-architecture deployment (amd64, arm64, arm/v7).
 
-- [Overview](#overview)
-  - [About FaceNet](#about-facenet)
-  - [About dlib](#about-dlib)
-- [Key Features](#key-features)
-- [Usage](#usage)
-  - [Dynamic Loading of People](#dynamic-loading-of-people)
-  - [Recognition of Faces](#recognition-of-faces)
-  - [Output Generation](#output-generation)
-  - [Capabilities](#capabilities)
-- [Installation and Usage](#installation-and-usage)
-- [Project Structure](#project-structure)
-- [Contributing](#contributing)
-- [License](#license)
+## Quick Start
+
+```bash
+make deps          # verify required tools
+make test          # run tests with coverage
+make image-build   # build multi-arch Docker images
+make image-run     # run Docker images interactively
+```
+
+## Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| [GNU Make](https://www.gnu.org/software/make/) | 3.81+ | Build orchestration |
+| [Go](https://go.dev/dl/) | 1.25+ | Language runtime (CGO enabled) |
+| [Git](https://git-scm.com/) | 2.0+ | Version control |
+| [Docker](https://www.docker.com/) | latest | Container builds and runtime |
+| [golangci-lint](https://golangci-lint.run/) | 2.11+ | Go linters (auto-installed by `make deps`) |
+| [act](https://github.com/nektos/act) | latest | Run GitHub Actions locally (optional) |
+
+Install all required dependencies:
+
+```bash
+make deps
+```
+
+## Available Make Targets
+
+Run `make help` to see all available targets.
+
+### Build & Run
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build Go binary for Linux amd64 |
+| `make build-arm64` | Build Go binary natively for macOS arm64 |
+| `make test` | Run tests with coverage |
+| `make lint` | Run Go linters and Dockerfile linting |
+| `make run` | Run the application locally |
+| `make clean` | Remove build artifacts and generated files |
+| `make update` | Update dependency packages to latest versions |
+| `make testdata` | Clone test data repository |
+
+### Docker
+
+| Target | Description |
+|--------|-------------|
+| `make image-build` | Build Docker images via buildx |
+| `make image-run` | Run Docker images interactively |
+| `make bootstrap` | Create Docker buildx multi-platform builder |
+| `make docker-prune` | Prune Docker system and buildx cache |
+| `make docker-setup-multiarch` | Install binfmt handlers for multi-arch Docker |
+| `make run-ghcr-amd64` | Run GHCR runtime image on amd64 |
+| `make run-ghcr-arm64` | Run GHCR runtime image on arm64 |
+
+### CI
+
+| Target | Description |
+|--------|-------------|
+| `make ci` | Run the full CI pipeline locally (deps, lint, test, build) |
+| `make ci-run` | Run GitHub Actions workflow locally using [act](https://github.com/nektos/act) |
+
+### Utilities
+
+| Target | Description |
+|--------|-------------|
+| `make deps` | Verify required tool dependencies |
+| `make version` | Print current version (tag) |
+| `make release` | Create and push a new semver tag |
+| `make tag-delete` | Delete a specific tag locally and remotely |
+| `make renovate-validate` | Validate Renovate configuration |
 
 ## About FaceNet
 
-Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/abs/1503.03832), a groundbreaking facial recognition system developed by Google. FaceNet employs a deep neural network to directly learn a mapping from facial images to a compact Euclidean space, where distances between embeddings correspond directly to a measure of facial similarity. By leveraging this learned embedding space, tasks such as facial recognition, verification, and clustering become straightforward, as FaceNet embeddings serve as feature vectors that capture essential facial characteristics. This integration enables Go-Face-Recognition to achieve state-of-the-art performance in facial recognition tasks, making it a versatile and powerful tool for various applications.
+Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/abs/1503.03832), a groundbreaking facial recognition system developed by Google. FaceNet employs a deep neural network to directly learn a mapping from facial images to a compact Euclidean space, where distances between embeddings correspond directly to a measure of facial similarity.
 
 ### About dlib
 
-[dlib](http://dlib.net/) is a modern C++ toolkit containing machine learning algorithms and tools for creating complex software in C++ to solve real-world problems. It is renowned for its robustness, efficiency, and versatility in various applications, including computer vision, machine learning, and artificial intelligence.
+[dlib](http://dlib.net/) is a modern C++ toolkit containing machine learning algorithms and tools for creating complex software in C++ to solve real-world problems. It is renowned for its robustness, efficiency, and versatility in computer vision, machine learning, and artificial intelligence.
 
-## Key Features
-
-- **Dynamic Person Loading:** Go-Face-Recognition dynamically loads people from within the 'persons' directory, enhancing flexibility.
-
-- **Precise Face Recognition:** Utilizing go-face library powered by dlib, the system performs accurate and reliable face recognition, even in complex scenarios.
-
-- **Easy Deployment with Docker:** To streamline dependency management and deployment, the project is encapsulated within a Docker environment, ensuring seamless integration into any development or production environment.
-
-This project relies on own Docker image of DLib - [dlib-docker](https://github.com/AndriyKalashnykov/dlib-docker)
 ## Usage
 
 ### Dynamic Loading of People
@@ -52,91 +101,22 @@ After loading the people, the software reads an image from the `images/` directo
 
 The output of the system is a new image with the faces marked and the name of each identified person. The generated image will be saved in the `images/` directory with the name `result.jpg`.
 
-### Capabilities
+## Project Structure
 
-The system enables effortless recognition of faces within images, empowering users with a powerful tool for various applications, including security, authentication, access control, and more.
-
-## Installation and Usage
-
-### Clone this repository
-
-```bash
-git clone https://github.com/AndriyKalashnykov/go-face-recognition.git
+```
+cmd/             # Application entry point (main.go)
+internal/
+  entity/        # Domain entities (person, drawer)
+  usecases/      # Business logic (load, classify, recognize persons)
+images/          # Input/output images for recognition
+persons/         # Person directories with face images for training
+models/          # Trained facial recognition models
+fonts/           # Fonts for image annotation
 ```
 
-### Navigate to the project directory:
+## Building on macOS
 
-```bash
-cd go-face-recognition
-```
-
-### Build & Run Docker image
-
-#### amd64
-
-```bash
-BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
-IMG=andriykalashnykov/go-face-recognition:latest-go-face
-docker buildx build --load --platform linux/amd64 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=$BUILDER_IMAGE -t $IMG .
-docker run -it --rm --platform linux/amd64 $IMG /bin/sh
-uname -m
-./main
-```
-
-#### arm64
-
-```bash
-BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
-IMG=andriykalashnykov/go-face-recognition:latest-go-face
-docker buildx build --load --platform linux/arm64 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=$BUILDER_IMAGE -t $IMG .
-docker run -it --rm --platform linux/arm64 $IMG /bin/sh
-uname -m
-./main
-```
-
-#### arm/v7
-
-```bash
-BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
-IMG=andriykalashnykov/go-face-recognition:latest-go-face
-docker buildx build --load --platform linux/arm/v7 -f Dockerfile.go-face --build-arg BUILDER_IMAGE=$BUILDER_IMAGE -t $IMG .
-docker run -it --rm --platform linux/arm/v7 $IMG /bin/sh
-uname -m
-./main
-```
-
-### Download & Run the Docker image
-
-#### amd64
-```bash
-IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3
-docker pull $IMG
-docker run -it --rm --platform linux/amd64 $IMG /bin/sh
-uname -m
-./main
-````
-
-#### arm64
-```bash
-IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3
-docker pull $IMG
-docker run -it --rm --platform linux/arm64 $IMG /bin/sh
-uname -m
-./main
-````
-
-#### arm/v7
-```bash
-IMG=ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3
-docker pull $IMG
-docker run -it --rm --platform linux/arm/v7 $IMG /bin/sh
-uname -m
-./main
-````
-
-### Building on MacOS
-
-Install OpenBLAS etc: 
+Install OpenBLAS etc:
 
 ```bash
 brew tap messense/macos-cross-toolchains
@@ -146,6 +126,7 @@ brew link openblas 2>&1
 ```
 
 Install dlib:
+
 ```bash
 brew install cmake
 git clone https://github.com/davisking/dlib.git
@@ -157,16 +138,23 @@ cmake --build . --config Release
 sudo make install
 ```
 
-run the following command:
+Build and run:
 
 ```bash
 make build-arm64
 ./cmd/main
 ```
 
-## Project Structure
+## CI/CD
 
-The `images/` directory contains the input and output images. The `persons/` directory contains sub-folders for each person, with images of that person to be used in the model. The `models/` directory contains the trained model for facial recognition. The `internal/` directory contains the core logic of the system, including entities and use cases. The `cmd/` directory contains the main entry point of the system.
+GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
+
+| Job | Triggers | Steps |
+|-----|----------|-------|
+| **ci** | push, PR, tags | Lint, Test |
+| **docker-image** | tags only (`v*`) | Build and push multi-arch Docker image to GHCR |
+
+[Renovate](https://docs.renovatebot.com/) keeps dependencies up to date with platform automerge enabled.
 
 ## Contributing
 

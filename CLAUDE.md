@@ -10,6 +10,7 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the go-
 - **Container**: Docker with multi-arch buildx (amd64, arm64, arm/v7)
 - **Registry**: GHCR (ghcr.io/andriykalashnykov/go-face-recognition)
 - **CI**: GitHub Actions
+- **Linting**: golangci-lint, hadolint
 
 ## Project Structure
 
@@ -32,23 +33,35 @@ make deps             # Verify required tool dependencies
 make build            # Build Go binary for Linux amd64
 make build-arm64      # Build Go binary for macOS arm64
 make test             # Run tests with coverage
-make lint             # Run golangci-lint
+make lint             # Run Go linters and Dockerfile linting
 make run              # Run the application locally
 make update           # Update Go dependencies
-make ci               # Run full CI pipeline (deps, lint, test)
+make ci               # Run full CI pipeline (deps, lint, test, build)
+make ci-run           # Run GitHub Actions workflow locally using act
 make image-build      # Build Docker images via buildx
 make image-run        # Run Docker images interactively
 make release          # Create and push a new semver tag
 make version          # Print current version tag
 ```
 
-## CI
+## Key Variables
 
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main and pull request:
-1. Checkout with full history
-2. Setup QEMU and Docker Buildx
-3. Build multi-platform Docker image (amd64, arm64, arm/v7)
-4. Push to GHCR on tag events only
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GO_VER` | `1.25.7` | Go version for Docker builds |
+| `GOLANGCI_VERSION` | `2.11.1` | golangci-lint version |
+| `ACT_VERSION` | `0.2.86` | act version for local CI |
+| `HADOLINT_VERSION` | `2.12.0` | hadolint version for Dockerfile linting |
+| `DOCKER_PLATFORM` | `linux/arm/v7` | Default Docker build platform |
+| `BUILDER_IMAGE` | `ghcr.io/andriykalashnykov/go-face:v0.0.3` | Base builder image |
+| `IMAGE_REPO` | `andriykalashnykov/go-face-recognition` | Docker image repository |
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main, tags, and pull requests:
+
+1. **ci** job: Checkout, Setup Go, Lint (`make lint`), Test (`make test`)
+2. **docker-image** job (tags only): Build and push multi-arch Docker image to GHCR
 
 A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old workflow runs weekly.
 

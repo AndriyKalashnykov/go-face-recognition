@@ -1,0 +1,4 @@
+ignored:
+  - DL3006  # Always tag the version of an image explicitly (uses ARG-based FROM)
+  - DL3008  # Pin versions in apt-get install
+  - DL3059  # Multiple consecutive RUN instructions

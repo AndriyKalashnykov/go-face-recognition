@@ -1,11 +1,14 @@
 # ──────────────────────────────────────────────────────────────
 # Tool versions (pinned)
 # ──────────────────────────────────────────────────────────────
-NVM_VERSION     ?= 0.40.4
-GO_VER          ?= 1.25.7
-DOCKER_PLATFORM ?= linux/arm/v7
-BUILDER_IMAGE   ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
-IMAGE_REPO      ?= andriykalashnykov/go-face-recognition
+NVM_VERSION      ?= 0.40.4
+GO_VER           ?= 1.25.7
+ACT_VERSION      := 0.2.86
+HADOLINT_VERSION := 2.12.0
+GOLANGCI_VERSION := 2.11.1
+DOCKER_PLATFORM  ?= linux/arm/v7
+BUILDER_IMAGE    ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
+IMAGE_REPO       ?= andriykalashnykov/go-face-recognition
 
 # ──────────────────────────────────────────────────────────────
 # Project metadata
@@ -21,11 +24,6 @@ SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 # Targets
 # ──────────────────────────────────────────────────────────────
 
-.PHONY: help deps clean testdata test build build-arm64 lint run update \
-        release bootstrap image-build image-run version docker-prune \
-        docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 tag-delete ci \
-        renovate-bootstrap renovate-validate
-
 #help: @ List available targets
 help:
 	@grep -E '^#[a-zA-Z0-9_-]+:.*@' $(MAKEFILE_LIST) | sort | sed 's/^#//' | awk 'BEGIN {FS = ": *@ *"}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -35,7 +33,23 @@ deps:
 	@command -v go   >/dev/null 2>&1 || { echo "ERROR: go is not installed";   exit 1; }
 	@command -v git  >/dev/null 2>&1 || { echo "ERROR: git is not installed";  exit 1; }
 	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed"; exit 1; }
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint v$(GOLANGCI_VERSION)..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v$(GOLANGCI_VERSION); }
 	@echo "All dependencies satisfied."
+
+#deps-act: @ Install act for local CI
+deps-act: deps
+	@command -v act >/dev/null 2>&1 || { echo "Installing act $(ACT_VERSION)..."; \
+		curl -sSfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin v$(ACT_VERSION); \
+	}
+
+#deps-hadolint: @ Install hadolint for Dockerfile linting
+deps-hadolint:
+	@command -v hadolint >/dev/null 2>&1 || { echo "Installing hadolint $(HADOLINT_VERSION)..."; \
+		curl -sSfL -o /tmp/hadolint https://github.com/hadolint/hadolint/releases/download/v$(HADOLINT_VERSION)/hadolint-Linux-x86_64 && \
+		install -m 755 /tmp/hadolint /usr/local/bin/hadolint && \
+		rm -f /tmp/hadolint; \
+	}
 
 #clean: @ Remove build artifacts and generated files
 clean:
@@ -47,12 +61,12 @@ testdata:
 	@git clone https://github.com/Kagami/go-face-testdata testdatas
 
 #test: @ Run tests with coverage
-test:
+test: deps
 	@go test --cover -parallel=1 -v -coverprofile=coverage.out -v ./...
 	@go tool cover -func=coverage.out | sort -rnk3
 
 #build: @ Build Go binary for Linux amd64
-build:
+build: deps
 	@GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc CXX=x86_64-linux-gnu-g++ \
 		CGO_ENABLED=1 \
 		CGO_LDFLAGS="-lcblas -llapack_atlas -lblas -latlas -lgfortran -lquadmath" \
@@ -61,7 +75,7 @@ build:
 		-o cmd/main cmd/main.go
 
 #build-arm64: @ Build Go binary natively for macOS arm64
-build-arm64:
+build-arm64: deps
 	@CGO_ENABLED=1 \
 		CGO_CXXFLAGS="-I/opt/homebrew/include -I/usr/local/include" \
 		CGO_CFLAGS="-Wno-pessimizing-move -Wno-unused-but-set-variable" \
@@ -69,17 +83,17 @@ build-arm64:
 		GOARCH=arm64 \
 		go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
-#lint: @ Run Go linters
-lint:
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "ERROR: golangci-lint is not installed"; exit 1; }
+#lint: @ Run Go linters and Dockerfile linting
+lint: deps deps-hadolint
 	@golangci-lint run ./...
+	@hadolint Dockerfile.go-face
 
 #run: @ Run the application locally
-run:
+run: deps
 	@go run cmd/main.go
 
 #update: @ Update dependency packages to latest versions
-update:
+update: deps
 	@go get -u ./...
 	@go mod tidy
 
@@ -130,9 +144,6 @@ docker-prune:
 	@docker system prune
 	@docker buildx prune
 
-# Setup Docker to run arm64 images on Ubuntu x86_64
-# https://jkfran.com/running-ubuntu-arm-with-docker/
-# https://www.stereolabs.com/docs/docker/building-arm-container-on-x86
 #docker-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
 docker-setup-multiarch:
 	@docker run --privileged --rm tonistiigi/binfmt --install all
@@ -152,9 +163,14 @@ tag-delete:
 	@git push --delete origin v0.0.3
 	@git tag --delete v0.0.3
 
-#ci: @ Run the full CI pipeline locally (deps, lint, test)
-ci: deps lint test
+#ci: @ Run the full CI pipeline locally (deps, lint, test, build)
+ci: deps lint test build
 	@echo "CI pipeline passed."
+
+#ci-run: @ Run GitHub Actions workflow locally using act
+ci-run: deps-act
+	@act push --container-architecture linux/amd64 \
+		--artifact-server-path /tmp/act-artifacts
 
 #renovate-bootstrap: @ Install nvm and npm for Renovate
 renovate-bootstrap:
@@ -169,3 +185,8 @@ renovate-bootstrap:
 #renovate-validate: @ Validate Renovate configuration
 renovate-validate: renovate-bootstrap
 	@npx --yes renovate --platform=local
+
+.PHONY: help deps deps-act deps-hadolint clean testdata test build build-arm64 \
+        lint run update release bootstrap image-build image-run version \
+        docker-prune docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 \
+        tag-delete ci ci-run renovate-bootstrap renovate-validate
