@@ -11,7 +11,6 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the [go
 
 ```bash
 make deps          # verify required tools
-make test          # run tests with coverage
 make image-build   # build multi-arch Docker images
 make image-run     # run Docker images interactively
 ```
@@ -151,8 +150,9 @@ GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 
 | Job | Triggers | Steps |
 |-----|----------|-------|
-| **ci** | push, PR, tags | Lint, Test |
-| **docker-image** | tags only (`v*`) | Build and push multi-arch Docker image to GHCR |
+| **docker-image** | push, PR, tags | Build multi-arch Docker image; push to GHCR on tags only |
+
+Build and test happen inside the Docker multi-stage build (CGO/dlib dependencies are only available in the builder image).
 
 [Renovate](https://docs.renovatebot.com/) keeps dependencies up to date with platform automerge enabled.
 

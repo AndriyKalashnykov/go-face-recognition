@@ -60,8 +60,9 @@ make version          # Print current version tag
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main, tags, and pull requests:
 
-1. **ci** job: Checkout, Setup Go, Lint (`make lint`), Test (`make test`)
-2. **docker-image** job (tags only): Build and push multi-arch Docker image to GHCR
+1. **docker-image** job: Build multi-arch Docker image (amd64, arm64, arm/v7); push to GHCR on tags only
+
+Build and test happen inside the Docker multi-stage build since CGO/dlib dependencies are only available in the builder image. Lint and test via `make ci` are for local development.
 
 A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old workflow runs weekly.
 

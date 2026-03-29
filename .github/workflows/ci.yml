@@ -15,33 +15,9 @@ concurrency:
 
 jobs:
 
-  ci:
-    name: ci
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
-        with:
-          go-version-file: go.mod
-
-      - name: Lint
-        run: make lint
-
-      - name: Test
-        run: make test
-
   docker-image:
 
     name: docker-image
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: ci
     runs-on: ubuntu-latest
 
     permissions:
@@ -69,6 +45,7 @@ jobs:
           OWNER: '${{ github.repository_owner }}'
 
       - name: Login to image repository
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
         with:
           registry: ghcr.io
@@ -105,7 +82,7 @@ jobs:
           platforms: linux/amd64, linux/arm64, linux/arm/v7
           build-args: |
             BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
-          push: true
+          push: ${{ github.ref_type == 'tag' }}
           provenance: false
           tags: ${{ steps.meta_builder.outputs.tags }}
           labels: ${{ steps.meta_builder.outputs.labels }}
