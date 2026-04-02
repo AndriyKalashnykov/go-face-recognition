@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────
 NVM_VERSION      ?= 0.40.4
 GO_VER           ?= 1.25.7
-ACT_VERSION      := 0.2.86
+ACT_VERSION      := 0.2.87
 HADOLINT_VERSION := 2.12.0
 GOLANGCI_VERSION := 2.11.1
 DOCKER_PLATFORM  ?= linux/arm/v7
