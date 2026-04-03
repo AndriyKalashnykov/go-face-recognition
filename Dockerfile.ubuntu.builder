@@ -3,7 +3,7 @@ ARG BUILDER_IMAGE="ubuntu:noble-20260217@sha256:186072bba1b2f436cbb91ef2567abca6
 # https://hub.docker.com/_/ubuntu/tags
 FROM ${BUILDER_IMAGE} AS builder
 
-ARG GO_VER=1.25.0
+ARG GO_VER=1.26.1
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update

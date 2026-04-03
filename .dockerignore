@@ -1,0 +1,14 @@
+.git
+.github
+.golangci.yml
+.hadolint.yaml
+.dockerignore
+testdatas
+coverage.out
+version.txt
+*.md
+!README.md
+Makefile
+renovate.json
+docker-compose.yml
+LICENSE

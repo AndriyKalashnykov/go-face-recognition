@@ -4,9 +4,9 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the go-
 
 ## Tech Stack
 
-- **Language**: Go 1.25.7 (CGO enabled)
-- **Face Recognition**: go-face (dlib C++ bindings)
-- **Image Processing**: golang/freetype, golang.org/x/image
+- **Language**: Go 1.26.1 (CGO enabled)
+- **Face Recognition**: go-face (fork of Kagami/go-face, dlib C++ bindings)
+- **Image Processing**: golang.org/x/image (font/opentype for TTF rendering)
 - **Container**: Docker with multi-arch buildx (amd64, arm64, arm/v7)
 - **Registry**: GHCR (ghcr.io/andriykalashnykov/go-face-recognition)
 - **CI**: GitHub Actions
@@ -15,14 +15,15 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the go-
 ## Project Structure
 
 ```
-cmd/             # Application entry point (main.go)
+cmd/                # Application entry point (main.go)
 internal/
-  entity/        # Domain entities (person, drawer)
-  usecases/      # Business logic (load, classify, recognize persons)
-images/          # Input/output images for recognition
-persons/         # Person directories with face images for training
-models/          # Trained facial recognition models
-fonts/           # Fonts for image annotation
+  entity/           # Domain entities (person, drawer)
+  usecases/         # Business logic (load, classify, recognize persons)
+images/             # Input/output images for recognition
+persons/            # Person directories with face images for training
+models/             # Trained facial recognition models
+fonts/              # Fonts for image annotation
+docker-compose.yml  # Docker Compose for local multi-container setup
 ```
 
 ## Common Commands
@@ -48,10 +49,10 @@ make version          # Print current version tag
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GO_VER` | `1.25.7` | Go version for Docker builds |
-| `GOLANGCI_VERSION` | `2.11.1` | golangci-lint version |
-| `ACT_VERSION` | `0.2.86` | act version for local CI |
-| `HADOLINT_VERSION` | `2.12.0` | hadolint version for Dockerfile linting |
+| `GO_VER` | `1.26.1` | Go version for Docker builds |
+| `GOLANGCI_VERSION` | `2.11.4` | golangci-lint version |
+| `ACT_VERSION` | `0.2.87` | act version for local CI |
+| `HADOLINT_VERSION` | `2.14.0` | hadolint version for Dockerfile linting |
 | `DOCKER_PLATFORM` | `linux/arm/v7` | Default Docker build platform |
 | `BUILDER_IMAGE` | `ghcr.io/andriykalashnykov/go-face:v0.0.3` | Base builder image |
 | `IMAGE_REPO` | `andriykalashnykov/go-face-recognition` | Docker image repository |
@@ -64,7 +65,7 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main,
 
 Build and test happen inside the Docker multi-stage build since CGO/dlib dependencies are only available in the builder image. Lint and test via `make ci` are for local development.
 
-A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old workflow runs weekly.
+A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old workflow runs weekly via native `gh` CLI.
 
 ## Build Notes
 
@@ -72,6 +73,22 @@ A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old w
 - Linux amd64 build requires: `x86_64-linux-gnu-gcc`, `x86_64-linux-gnu-g++`, LAPACK, BLAS, ATLAS, gfortran
 - macOS arm64 build requires: Homebrew dlib, OpenBLAS
 - Docker builds use pre-built builder image: `ghcr.io/andriykalashnykov/go-face:v0.0.3`
+
+## Upgrade Backlog
+
+Last reviewed: 2026-04-03
+
+- [x] ~~Migrate `golang/freetype` to `golang.org/x/image/font/opentype`~~ (done 2026-04-03)
+- [x] ~~Bump `NODE_VERSION` 22 → 24~~ (done 2026-04-03)
+- [x] ~~Bump `HADOLINT_VERSION` 2.12.0 → 2.14.0~~ (done 2026-04-03)
+- [x] ~~Bump `GOLANGCI_VERSION` 2.11.1 → 2.11.4~~ (done 2026-04-03)
+- [x] ~~Update `GO_VER` to 1.26.1 in Makefile and Dockerfile ARG defaults~~ (done 2026-04-03)
+- [x] ~~Create `.dockerignore`~~ (done 2026-04-03)
+- [x] ~~Address `Dockerfile.alpine.runtme.local` mutable `:latest-builder` tag~~ (done 2026-04-03 — added ARG pattern for override)
+- [x] ~~Remove `version: "3.8"` from docker-compose.yml~~ (done 2026-04-03)
+- [x] ~~Add Renovate `customManagers` for Dockerfile `ARG GO_VER` defaults~~ (done 2026-04-03)
+- [ ] Pin `Dockerfile.alpine.runtme` base image with digest (needs image pull to obtain sha256)
+- [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
 
 ## Skills
 

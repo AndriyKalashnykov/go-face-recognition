@@ -5,17 +5,23 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: write
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Delete old workflow runs
-        uses: Mattraks/delete-workflow-runs@b3018382ca039b53d238908238bd35d1fb14f8ee # v2
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          retain_days: 7
-          keep_minimum_runs: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh run list --status completed --limit 100 --json databaseId,createdAt \
+            --jq '[.[] | select(.createdAt < (now - 7*24*3600 | strftime("%Y-%m-%dT%H:%M:%SZ")))] | .[5:] | .[].databaseId' \
+          | xargs -I{} gh run delete {} 2>/dev/null || true

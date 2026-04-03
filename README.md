@@ -11,6 +11,8 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the [go
 
 ```bash
 make deps          # verify required tools
+make build         # build Go binary for Linux amd64
+make test          # run tests with coverage
 make image-build   # build multi-arch Docker images
 make image-run     # run Docker images interactively
 ```
@@ -24,7 +26,8 @@ make image-run     # run Docker images interactively
 | [Git](https://git-scm.com/) | 2.0+ | Version control |
 | [Docker](https://www.docker.com/) | latest | Container builds and runtime |
 | [golangci-lint](https://golangci-lint.run/) | 2.11+ | Go linters (auto-installed by `make deps`) |
-| [act](https://github.com/nektos/act) | latest | Run GitHub Actions locally (optional) |
+| [hadolint](https://github.com/hadolint/hadolint) | 2.12+ | Dockerfile linting (auto-installed by `make deps-hadolint`) |
+| [act](https://github.com/nektos/act) | 0.2.87+ | Run GitHub Actions locally (optional) |
 
 Install all required dependencies:
 
@@ -42,12 +45,17 @@ Run `make help` to see all available targets.
 |--------|-------------|
 | `make build` | Build Go binary for Linux amd64 |
 | `make build-arm64` | Build Go binary natively for macOS arm64 |
-| `make test` | Run tests with coverage |
-| `make lint` | Run Go linters and Dockerfile linting |
 | `make run` | Run the application locally |
 | `make clean` | Remove build artifacts and generated files |
-| `make update` | Update dependency packages to latest versions |
 | `make testdata` | Clone test data repository |
+
+### Code Quality
+
+| Target | Description |
+|--------|-------------|
+| `make test` | Run tests with coverage |
+| `make lint` | Run Go linters and Dockerfile linting |
+| `make update` | Update dependency packages to latest versions |
 
 ### Docker
 
@@ -55,7 +63,7 @@ Run `make help` to see all available targets.
 |--------|-------------|
 | `make image-build` | Build Docker images via buildx |
 | `make image-run` | Run Docker images interactively |
-| `make bootstrap` | Create Docker buildx multi-platform builder |
+| `make image-bootstrap` | Create Docker buildx multi-platform builder |
 | `make docker-prune` | Prune Docker system and buildx cache |
 | `make docker-setup-multiarch` | Install binfmt handlers for multi-arch Docker |
 | `make run-ghcr-amd64` | Run GHCR runtime image on amd64 |
@@ -72,19 +80,16 @@ Run `make help` to see all available targets.
 
 | Target | Description |
 |--------|-------------|
+| `make help` | List available targets |
 | `make deps` | Verify required tool dependencies |
+| `make deps-act` | Install act for local CI |
+| `make deps-hadolint` | Install hadolint for Dockerfile linting |
+| `make deps-prune-check` | Verify go.mod and go.sum are tidy |
 | `make version` | Print current version (tag) |
 | `make release` | Create and push a new semver tag |
 | `make tag-delete` | Delete a specific tag locally and remotely |
+| `make renovate-bootstrap` | Install nvm and npm for Renovate |
 | `make renovate-validate` | Validate Renovate configuration |
-
-## About FaceNet
-
-Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/abs/1503.03832), a groundbreaking facial recognition system developed by Google. FaceNet employs a deep neural network to directly learn a mapping from facial images to a compact Euclidean space, where distances between embeddings correspond directly to a measure of facial similarity.
-
-### About dlib
-
-[dlib](http://dlib.net/) is a modern C++ toolkit containing machine learning algorithms and tools for creating complex software in C++ to solve real-world problems. It is renowned for its robustness, efficiency, and versatility in computer vision, machine learning, and artificial intelligence.
 
 ## Usage
 
@@ -99,6 +104,14 @@ After loading the people, the software reads an image from the `images/` directo
 ### Output Generation
 
 The output of the system is a new image with the faces marked and the name of each identified person. The generated image will be saved in the `images/` directory with the name `result.jpg`.
+
+## About FaceNet
+
+Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/abs/1503.03832), a groundbreaking facial recognition system developed by Google. FaceNet employs a deep neural network to directly learn a mapping from facial images to a compact Euclidean space, where distances between embeddings correspond directly to a measure of facial similarity.
+
+### About dlib
+
+[dlib](http://dlib.net/) is a modern C++ toolkit containing machine learning algorithms and tools for creating complex software in C++ to solve real-world problems. It is renowned for its robustness, efficiency, and versatility in computer vision, machine learning, and artificial intelligence.
 
 ## Project Structure
 
@@ -151,6 +164,7 @@ GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 | Job | Triggers | Steps |
 |-----|----------|-------|
 | **docker-image** | push, PR, tags | Build multi-arch Docker image; push to GHCR on tags only |
+| **cleanup** | weekly (Sunday) | Remove old workflow runs via native `gh` CLI |
 
 Build and test happen inside the Docker multi-stage build (CGO/dlib dependencies are only available in the builder image).
 

@@ -8,8 +8,8 @@ import (
 	"math"
 	"os"
 
-	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -25,7 +25,7 @@ type Drawer interface {
 type DrawerImpl struct {
 	img   *image.Image
 	dst   *image.RGBA
-	font  *truetype.Font
+	font  *opentype.Font
 	color color.RGBA
 }
 
@@ -72,10 +72,15 @@ func (d *DrawerImpl) drawName(txt string, x, y int, h float64) {
 	// Define the font size as a fraction of the face height
 	fontSize := h / 3
 
+	face, err := opentype.NewFace(d.font, &opentype.FaceOptions{Size: fontSize, Hinting: font.HintingNone, DPI: 72.0})
+	if err != nil {
+		return
+	}
+
 	dr := &font.Drawer{
 		Dst:  d.dst,
 		Src:  image.NewUniform(d.color),
-		Face: truetype.NewFace(d.font, &truetype.Options{Size: fontSize, Hinting: font.HintingNone, DPI: 72.0}),
+		Face: face,
 	}
 
 	dr.Dot = fixed.Point26_6{
@@ -92,8 +97,7 @@ func (d *DrawerImpl) loadFont(path string) error {
 		return err
 	}
 
-	f, err := truetype.Parse(fontBytes)
-
+	f, err := opentype.Parse(fontBytes)
 	if err != nil {
 		return err
 	}

@@ -2,10 +2,11 @@
 # Tool versions (pinned)
 # ──────────────────────────────────────────────────────────────
 NVM_VERSION      ?= 0.40.4
-GO_VER           ?= 1.25.7
+NODE_VERSION     := 24
+GO_VER           ?= 1.26.1
 ACT_VERSION      := 0.2.87
-HADOLINT_VERSION := 2.12.0
-GOLANGCI_VERSION := 2.11.1
+HADOLINT_VERSION := 2.14.0
+GOLANGCI_VERSION := 2.11.4
 DOCKER_PLATFORM  ?= linux/arm/v7
 BUILDER_IMAGE    ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
 IMAGE_REPO       ?= andriykalashnykov/go-face-recognition
@@ -57,7 +58,7 @@ clean:
 	@echo "Cleaned build artifacts."
 
 #testdata: @ Clone test data repository
-testdata:
+testdata: deps
 	@git clone https://github.com/Kagami/go-face-testdata testdatas
 
 #test: @ Run tests with coverage
@@ -98,7 +99,7 @@ update: deps
 	@go mod tidy
 
 #release: @ Create and push a new semver tag
-release:
+release: deps
 	$(eval NT=$(NEWTAG))
 	@if ! echo "$(NT)" | grep -qE '$(SEMVER_REGEX)'; then \
 		echo "ERROR: '$(NT)' is not valid semver (expected vX.Y.Z)"; \
@@ -113,8 +114,8 @@ release:
 	@git push
 	@echo "Done."
 
-#bootstrap: @ Create Docker buildx multi-platform builder
-bootstrap:
+#image-bootstrap: @ Create Docker buildx multi-platform builder
+image-bootstrap:
 	@docker buildx create --use --platform=linux/arm64,linux/amd64,linux/arm/v7 --name multi-platform-builder
 	@docker buildx inspect --bootstrap
 
@@ -151,20 +152,33 @@ docker-setup-multiarch:
 
 #run-ghcr-amd64: @ Run GHCR runtime image on amd64
 run-ghcr-amd64:
-	@docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
+	@docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
 
 #run-ghcr-arm64: @ Run GHCR runtime image on arm64
 run-ghcr-arm64:
-	@docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-runtime /bin/sh
+	@docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
 
 #tag-delete: @ Delete a specific tag locally and remotely
 tag-delete:
+	@if [ -z "$(TAG)" ]; then echo "ERROR: TAG is required. Usage: make tag-delete TAG=v1.0.0"; exit 1; fi
 	@rm -f version.txt
-	@git push --delete origin v0.0.3
-	@git tag --delete v0.0.3
+	@git push --delete origin $(TAG)
+	@git tag --delete $(TAG)
+
+#deps-prune-check: @ Verify go.mod and go.sum are tidy
+deps-prune-check: deps
+	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
+	@go mod tidy
+	@if ! diff -q go.mod go.mod.bak >/dev/null 2>&1 || ! diff -q go.sum go.sum.bak >/dev/null 2>&1; then \
+		echo "ERROR: go.mod/go.sum not tidy. Run 'go mod tidy'."; \
+		mv go.mod.bak go.mod; mv go.sum.bak go.sum; \
+		exit 1; \
+	fi
+	@rm -f go.mod.bak go.sum.bak
+	@echo "go.mod/go.sum are tidy."
 
 #ci: @ Run the full CI pipeline locally (deps, lint, test, build)
-ci: deps lint test build
+ci: deps lint test build deps-prune-check
 	@echo "CI pipeline passed."
 
 #ci-run: @ Run GitHub Actions workflow locally using act
@@ -179,7 +193,7 @@ renovate-bootstrap:
 		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$(NVM_VERSION)/install.sh | bash; \
 		export NVM_DIR="$$HOME/.nvm"; \
 		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		nvm install --lts; \
+		nvm install $(NODE_VERSION); \
 	}
 
 #renovate-validate: @ Validate Renovate configuration
@@ -187,6 +201,6 @@ renovate-validate: renovate-bootstrap
 	@npx --yes renovate --platform=local
 
 .PHONY: help deps deps-act deps-hadolint clean testdata test build build-arm64 \
-        lint run update release bootstrap image-build image-run version \
+        lint run update release image-bootstrap image-build image-run version \
         docker-prune docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 \
-        tag-delete ci ci-run renovate-bootstrap renovate-validate
+        tag-delete ci ci-run renovate-bootstrap renovate-validate deps-prune-check

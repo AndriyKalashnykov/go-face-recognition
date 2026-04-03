@@ -20,7 +20,6 @@
   "automergeType": "branch",
   "automergeStrategy": "squash",
   "ignoreTests": false,
-  "rebaseWhen": "behind-base-branch",
   "vulnerabilityAlerts": {
     "labels": [
       "security"
@@ -28,6 +27,72 @@
     "automerge": true,
     "minimumReleaseAge": "0 days"
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track golangci-lint version in Makefile",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "GOLANGCI_VERSION\\s*:=\\s*(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track act version in Makefile",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "ACT_VERSION\\s*:=\\s*(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "nektos/act",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track hadolint version in Makefile",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "HADOLINT_VERSION\\s*:=\\s*(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "hadolint/hadolint",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track nvm version in Makefile",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "NVM_VERSION\\s*\\?=\\s*(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "nvm-sh/nvm",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track Go version for Docker builds in Makefile",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "GO_VER\\s*\\?=\\s*(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track Go version ARG defaults in Dockerfiles",
+      "managerFilePatterns": ["/Dockerfile/"],
+      "matchStrings": [
+        "ARG GO_VER[= ]+\"?(?<currentValue>\\d+\\.\\d+\\.\\d+)\"?\\n"
+      ],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "Wait 3 days before automerging major updates",
@@ -52,6 +117,13 @@
         "go"
       ],
       "rangeStrategy": "bump"
+    },
+    {
+      "description": "Group Makefile tool version updates",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "groupName": "Makefile tool versions"
     }
   ]
 }
