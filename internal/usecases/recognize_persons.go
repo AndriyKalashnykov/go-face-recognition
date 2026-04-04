@@ -36,10 +36,10 @@ func (r *RecognizePersonsUseCaseImpl) Execute(persons map[int]*entity.Person) er
 		for _, imagePath := range p.ImagesPath {
 			face, err := r.rec.RecognizeSingleFile(imagePath)
 			if err != nil {
-				return fmt.Errorf("Can't recognize: %v", err)
+				return fmt.Errorf("can't recognize: %w", err)
 			}
 			if face == nil {
-				return fmt.Errorf("Unable to recognize people in the image")
+				return fmt.Errorf("unable to recognize people in the image")
 			}
 			faces = append(faces, face.Descriptor)
 			categories = append(categories, int32(p.ID))

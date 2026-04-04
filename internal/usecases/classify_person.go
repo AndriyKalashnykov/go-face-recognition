@@ -39,11 +39,11 @@ func (c *ClassifyPersonsUseCaseImpl) Execute(unkImagePath string, threshold floa
 	unkFaces, err := c.rec.RecognizeFile(unkImagePath)
 
 	if err != nil {
-		return nil, fmt.Errorf("Can't recognize: %v", err)
+		return nil, fmt.Errorf("can't recognize: %w", err)
 	}
 
 	if len(unkFaces) == 0 {
-		return nil, fmt.Errorf("Unable to recognize people in the image")
+		return nil, fmt.Errorf("unable to recognize people in the image")
 	}
 
 	// Classify the unknown faces

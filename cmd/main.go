@@ -31,6 +31,9 @@ func main() {
 
 	// Load persons from fs.
 	persons, err := loadPersonsUseCase.Execute(personsDir)
+	if err != nil {
+		log.Fatalf("Can't load persons: %v", err)
+	}
 
 	initRecognizerTime := time.Now()
 
@@ -76,6 +79,7 @@ func main() {
 		drawer.DrawFace(recognizedFace.Face.Rectangle, persons[recognizedFace.ID].Name)
 	}
 
-	drawer.SaveImage(filepath.Join(imagesDir, "result.jpg"))
-
+	if err := drawer.SaveImage(filepath.Join(imagesDir, "result.jpg")); err != nil {
+		log.Fatalf("Can't save result image: %v", err)
+	}
 }

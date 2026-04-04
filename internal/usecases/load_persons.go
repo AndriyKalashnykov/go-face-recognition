@@ -32,15 +32,14 @@ func (l *LoadPersonsUseCaseImpl) Execute(personsDir string) (map[int]*entity.Per
 	// Open persons directory
 	dir, err := os.Open(personsDir)
 	if err != nil {
-		fmt.Println("Error on open persons directory:", err)
+		return nil, fmt.Errorf("error opening persons directory: %w", err)
 	}
 	defer dir.Close()
 
 	// Read the directory content
 	subFolders, err := dir.Readdir(-1)
 	if err != nil {
-		fmt.Println("Error on read persons directory:", err)
-		return nil, err
+		return nil, fmt.Errorf("error reading persons directory: %w", err)
 	}
 
 	persons := map[int]*entity.Person{}
@@ -56,8 +55,7 @@ func (l *LoadPersonsUseCaseImpl) Execute(personsDir string) (map[int]*entity.Per
 
 		files, err := os.ReadDir(personDir)
 		if err != nil {
-			fmt.Printf("Error on read person directory: %s\n", personDir)
-			return nil, err
+			return nil, fmt.Errorf("error reading person directory %s: %w", personDir, err)
 		}
 
 		var imagesPath []string

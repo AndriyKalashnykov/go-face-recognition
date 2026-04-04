@@ -15,10 +15,6 @@ import (
 
 type Drawer interface {
 	DrawFace(rectangle image.Rectangle, name string)
-	drawLine(img draw.Image, x0, y0, x1, y1 int, color color.RGBA)
-	drawName(txt string, x, y int, h float64)
-	loadImage(path string) error
-	loadFont(path string) error
 	SaveImage(path string) error
 }
 
