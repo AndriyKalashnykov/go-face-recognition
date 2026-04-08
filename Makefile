@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────
 NVM_VERSION      ?= 0.40.4
 NODE_VERSION     := 24
-GO_VER           ?= 1.26.1
+GO_VER           ?= 1.26.2
 ACT_VERSION      := 0.2.87
 HADOLINT_VERSION := 2.14.0
 GOLANGCI_VERSION := 2.11.4
@@ -63,7 +63,7 @@ testdata: deps
 
 #test: @ Run tests with coverage
 test: deps
-	@go test --cover -parallel=1 -v -coverprofile=coverage.out -v ./...
+	@go test -cover -parallel=1 -v -coverprofile=coverage.out ./...
 	@go tool cover -func=coverage.out | sort -rnk3
 
 #build: @ Build Go binary for Linux amd64

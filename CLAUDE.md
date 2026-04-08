@@ -4,7 +4,7 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the go-
 
 ## Tech Stack
 
-- **Language**: Go 1.26.1 (CGO enabled)
+- **Language**: Go 1.26.2 (CGO enabled)
 - **Face Recognition**: go-face (fork of Kagami/go-face, dlib C++ bindings)
 - **Image Processing**: golang.org/x/image (font/opentype for TTF rendering)
 - **Container**: Docker with multi-arch buildx (amd64, arm64, arm/v7)
@@ -49,7 +49,7 @@ make version          # Print current version tag
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GO_VER` | `1.26.1` | Go version for Docker builds |
+| `GO_VER` | `1.26.2` | Go version for Docker builds |
 | `GOLANGCI_VERSION` | `2.11.4` | golangci-lint version |
 | `ACT_VERSION` | `0.2.87` | act version for local CI |
 | `HADOLINT_VERSION` | `2.14.0` | hadolint version for Dockerfile linting |
@@ -76,17 +76,10 @@ A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old w
 
 ## Upgrade Backlog
 
-Last reviewed: 2026-04-03
+Last reviewed: 2026-04-07
 
-- [x] ~~Migrate `golang/freetype` to `golang.org/x/image/font/opentype`~~ (done 2026-04-03)
-- [x] ~~Bump `NODE_VERSION` 22 → 24~~ (done 2026-04-03)
-- [x] ~~Bump `HADOLINT_VERSION` 2.12.0 → 2.14.0~~ (done 2026-04-03)
-- [x] ~~Bump `GOLANGCI_VERSION` 2.11.1 → 2.11.4~~ (done 2026-04-03)
-- [x] ~~Update `GO_VER` to 1.26.1 in Makefile and Dockerfile ARG defaults~~ (done 2026-04-03)
-- [x] ~~Create `.dockerignore`~~ (done 2026-04-03)
-- [x] ~~Address `Dockerfile.alpine.runtme.local` mutable `:latest-builder` tag~~ (done 2026-04-03 — added ARG pattern for override)
-- [x] ~~Remove `version: "3.8"` from docker-compose.yml~~ (done 2026-04-03)
-- [x] ~~Add Renovate `customManagers` for Dockerfile `ARG GO_VER` defaults~~ (done 2026-04-03)
+- [x] ~~Bump `GO_VER` 1.26.1 → 1.26.2~~ (done 2026-04-07)
+- [x] ~~Bump Ubuntu noble-20260217 → noble-20260324 in Dockerfile.ubuntu.builder~~ (done 2026-04-07)
 - [ ] Pin `Dockerfile.alpine.runtme` base image with digest (needs image pull to obtain sha256)
 - [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
 

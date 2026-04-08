@@ -22,11 +22,11 @@ make image-run     # run Docker images interactively
 | Tool | Version | Purpose |
 |------|---------|---------|
 | [GNU Make](https://www.gnu.org/software/make/) | 3.81+ | Build orchestration |
-| [Go](https://go.dev/dl/) | 1.25+ | Language runtime (CGO enabled) |
+| [Go](https://go.dev/dl/) | 1.26+ | Language runtime (CGO enabled) |
 | [Git](https://git-scm.com/) | 2.0+ | Version control |
 | [Docker](https://www.docker.com/) | latest | Container builds and runtime |
 | [golangci-lint](https://golangci-lint.run/) | 2.11+ | Go linters (auto-installed by `make deps`) |
-| [hadolint](https://github.com/hadolint/hadolint) | 2.12+ | Dockerfile linting (auto-installed by `make deps-hadolint`) |
+| [hadolint](https://github.com/hadolint/hadolint) | 2.14+ | Dockerfile linting (auto-installed by `make deps-hadolint`) |
 | [act](https://github.com/nektos/act) | 0.2.87+ | Run GitHub Actions locally (optional) |
 
 Install all required dependencies:

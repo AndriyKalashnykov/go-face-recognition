@@ -2,7 +2,7 @@ ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/dlib-docker:v20.0.0@sha256:199cece5
 
 FROM ${BUILDER_IMAGE} AS builder
 
-ARG GO_VER="1.26.1"
+ARG GO_VER="1.26.2"
 ARG DEBIAN_FRONTEND=noninteractive
 
 #RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends libgfortran5 libquadmath0-amd64-cross libquadrule-dev
@@ -18,7 +18,7 @@ COPY ./go.sum .
 COPY ./cmd/ cmd/
 COPY ./internal/ internal/
 
-# Copy the recources
+# Copy the resources
 COPY ./fonts/ fonts/
 COPY ./images/ images/
 COPY ./models/ models/

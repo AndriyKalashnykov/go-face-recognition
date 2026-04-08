@@ -13,7 +13,7 @@ COPY ./go.sum .
 COPY ./cmd/ cmd/
 COPY ./internal/ internal/
 
-# Copy the recources
+# Copy the resources
 COPY ./fonts/ fonts/
 COPY ./images/ images/
 COPY ./models/ models/
