@@ -100,9 +100,10 @@ Last reviewed: 2026-04-10
 - [x] ~~Pin `Dockerfile.alpine.runtme` base image with digest~~ (already pinned to `alpine:3.23.3@sha256:25109184...`)
 - [x] ~~Add non-root `USER` directive to runtime Dockerfiles~~ (done 2026-04-10 — UID 10001 in `Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtme{,.local}`; DS-0002 now passes without `.trivyignore`)
 - [x] ~~Add Trivy image scan + smoke test before push (`/harden-image-pipeline` Phase 1)~~ (done 2026-04-10)
+- [x] ~~`/harden-image-pipeline` Phase 2 — cosign keyless OIDC signing~~ (done 2026-04-10 — tag-gated `sigstore/cosign-installer@cad07c2e # v4.1.1` + `cosign sign --yes <tag>@<digest>` loop; docker job gained `id-token: write` permission)
+- [x] ~~`apk upgrade` in runtime stages to pick up CVE patches between alpine image cuts~~ (done 2026-04-10 — closed CVE-2026-28390 openssl + CVE-2026-22184 zlib)
 - [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
 - [ ] Rename typo `Dockerfile.alpine.runtme` → `Dockerfile.alpine.runtime`
-- [ ] `/harden-image-pipeline` Phase 2 — cosign keyless OIDC signing (deferred — Phase 1 only was picked)
 
 ## Skills
 

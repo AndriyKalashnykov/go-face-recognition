@@ -232,10 +232,21 @@ The `docker` job runs the following gates **before** any image is pushed to GHCR
 | 2 | **Trivy image scan** (CRITICAL/HIGH blocking) | CVEs in the base image, OS packages, build layers, leaked secrets, Dockerfile misconfigs | `aquasecurity/trivy-action` with `image-ref:` |
 | 3 | **Smoke test** | Image actually works — boots the CLI binary and runs the face-recognition pipeline against baked-in test data; exit 0 means dlib loaded, the recognizer initialised, and `result.jpg` was written | `docker run --entrypoint /app/main` |
 | 4 | Multi-arch build + conditional push | `linux/amd64`, `linux/arm64`, and `linux/arm/v7` cross-compile regressions. On tag push: publishes to GHCR. On non-tag push: validation-only. | `docker/build-push-action` with `push: ${{ startsWith(github.ref, 'refs/tags/') }}` |
+| 5 | **Cosign keyless OIDC signing** (tag push only) | Unsigned or tampered images — every published tag gets a Sigstore signature on the manifest digest, verifiable without any long-lived key material | `sigstore/cosign-installer` + `cosign sign --yes <tag>@<digest>` |
 
-Buildkit in-manifest attestations (`provenance`, `sbom`) are deliberately disabled so the OCI image index stays free of `unknown/unknown` platform entries — this lets the GHCR Packages UI render the **"OS / Arch"** tab correctly on the package overview page.
+Buildkit in-manifest attestations (`provenance`, `sbom`) are deliberately disabled so the OCI image index stays free of `unknown/unknown` platform entries — this lets the GHCR Packages UI render the **"OS / Arch"** tab correctly on the package overview page. Supply-chain verification comes from cosign signing, not from in-manifest SLSA attestations.
 
-Runtime Dockerfiles (`Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtme*`) run as numeric UID `10001` in a non-root `app` group (K8s restricted-pod-security compatible).
+Runtime Dockerfiles (`Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtme*`) run as numeric UID `10001` in a non-root `app` group (K8s restricted-pod-security compatible). Every runtime stage also runs `apk --no-cache upgrade` as its first layer to pick up security patches published between alpine image cuts.
+
+#### Verifying a published image signature
+
+```bash
+cosign verify ghcr.io/andriykalashnykov/go-face-recognition:<tag> \
+  --certificate-identity-regexp 'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Expected output: a JSON certificate chain ending in `"issuer": "https://token.actions.githubusercontent.com"` with `"Subject"` pointing at the `AndriyKalashnykov/go-face-recognition` workflow. Any tampering with the image after publish invalidates the signature.
 
 [Renovate](https://docs.renovatebot.com/) keeps dependencies up to date with platform automerge enabled.
 

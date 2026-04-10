@@ -50,7 +50,8 @@ jobs:
 
     permissions:
       contents: read
-      packages: write
+      packages: write       # registry push to GHCR (only exercised on tag pushes)
+      id-token: write       # cosign keyless OIDC (Sigstore Fulcio — only exercised on tag pushes)
 
     steps:
 
@@ -173,3 +174,27 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ----------------------------------------------------------------
+      # GATE 5: Cosign keyless OIDC signing — tag-only.
+      # No long-lived keys — uses GitHub OIDC → Sigstore Fulcio → Rekor.
+      # Signs by manifest digest (not tag) so a race with another build
+      # cannot substitute a different image under the same tag between
+      # push and sign.
+      # ----------------------------------------------------------------
+      - name: Install cosign
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign image with cosign
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "→ cosign sign ${tag}@${DIGEST}"
+            cosign sign --yes "${tag}@${DIGEST}"
+          done <<< "${TAGS}"
