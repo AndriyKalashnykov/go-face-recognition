@@ -35,9 +35,14 @@ EOT
 
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS runtime
 
+# Pick up security patches published between alpine image cuts. The apk
+# mirror has patched packages even when no new image digest exists.
+# Combined with addgroup/adduser into one layer.
 # Non-root numeric UID — required for K8s restricted pod security
 # (runAsNonRoot: true, allowPrivilegeEscalation: false).
-RUN addgroup -g 10001 -S app && adduser -u 10001 -S -G app app
+RUN apk --no-cache upgrade && \
+    addgroup -g 10001 -S app && \
+    adduser -u 10001 -S -G app app
 
 WORKDIR /app
 
