@@ -46,13 +46,19 @@ EOT
 
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS runtime
 
+# Non-root numeric UID — required for K8s restricted pod security.
+RUN addgroup -g 10001 -S app && adduser -u 10001 -S -G app app
+
 WORKDIR /app
 
 COPY --from=builder /app/cmd/main .
 COPY --from=builder /app/fonts fonts/
-COPY --from=builder /app/images/ images/
+# images/ must be writable because the binary saves result.jpg back into it.
+COPY --chown=10001:10001 --from=builder /app/images/ images/
 COPY --from=builder /app/models/ models/
 COPY --from=builder /app/persons/ persons/
+
+USER 10001
 
 # Keep the container running
 CMD ["tail", "-f", "/dev/null"]
