@@ -7,6 +7,18 @@
 
 Facial recognition system built in Go, based on FaceNet principles. Uses the [go-face](https://github.com/AndriyKalashnykov/go-face) library (backed by [dlib](http://dlib.net/) C++) for face detection and recognition. Dockerized for multi-architecture deployment (amd64, arm64, arm/v7).
 
+| Component         | Technology                                       |
+|-------------------|--------------------------------------------------|
+| Language          | Go 1.26.2 (CGO enabled)                          |
+| Face Recognition  | go-face (fork of Kagami/go-face, dlib C++)       |
+| Image Processing  | golang.org/x/image (font/opentype for TTF)       |
+| Container         | Docker multi-arch buildx (amd64, arm64, arm/v7)  |
+| Registry          | GHCR (ghcr.io/andriykalashnykov/go-face-recognition) |
+| CI                | GitHub Actions                                   |
+| Linting           | golangci-lint (gosec, gocritic, errorlint, …), hadolint, actionlint |
+| Security scanning | gitleaks (secrets), Trivy (fs), govulncheck (Go CVEs) |
+| Dependency updates| Renovate                                         |
+
 ## Quick Start
 
 ```bash
@@ -22,18 +34,35 @@ make image-run     # run Docker images interactively
 | Tool | Version | Purpose |
 |------|---------|---------|
 | [GNU Make](https://www.gnu.org/software/make/) | 3.81+ | Build orchestration |
-| [Go](https://go.dev/dl/) | 1.26+ | Language runtime (CGO enabled) |
+| [Go](https://go.dev/dl/) | 1.26.2 | Language runtime (CGO enabled) |
 | [Git](https://git-scm.com/) | 2.0+ | Version control |
 | [Docker](https://www.docker.com/) | latest | Container builds and runtime |
-| [golangci-lint](https://golangci-lint.run/) | 2.11+ | Go linters (auto-installed by `make deps`) |
-| [hadolint](https://github.com/hadolint/hadolint) | 2.14+ | Dockerfile linting (auto-installed by `make deps-hadolint`) |
-| [act](https://github.com/nektos/act) | 0.2.87+ | Run GitHub Actions locally (optional) |
+| [golangci-lint](https://golangci-lint.run/) | 2.11.4 | Go linters (auto-installed by `make deps`) |
+| [hadolint](https://github.com/hadolint/hadolint) | 2.14.0 | Dockerfile linting (auto-installed by `make deps-hadolint`) |
+| [actionlint](https://github.com/rhysd/actionlint) | 1.7.12 | GitHub Actions workflow linting (auto-installed by `make deps-actionlint`) |
+| [shellcheck](https://github.com/koalaman/shellcheck) | 0.11.0 | Shell script linting (auto-installed by `make deps-shellcheck`) |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | 8.30.1 | Secret scanning (auto-installed by `make deps-gitleaks`) |
+| [Trivy](https://trivy.dev/) | 0.69.3 | Filesystem/image security scanning (auto-installed by `make deps-trivy`) |
+| [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | 1.1.4 | Go module vulnerability scanning (auto-installed by `make deps-govulncheck`) |
+| [act](https://github.com/nektos/act) | 0.2.87 | Run GitHub Actions locally (optional) |
 
-Install all required dependencies:
+Install Go tool dependencies:
 
 ```bash
 make deps
 ```
+
+### Linux system C development headers (required for CGO build)
+
+Because go-face links against dlib and friends via CGO, local `make lint`, `make test`, and `make build` require the following Debian/Ubuntu packages in addition to `make deps`:
+
+```bash
+sudo apt-get install -y \
+    libjpeg-dev libdlib-dev libopenblas-dev libblas-dev \
+    libatlas-base-dev liblapack-dev gfortran libpng-dev
+```
+
+If these headers are missing, tools like `golangci-lint` and `govulncheck` will fail with `fatal error: jpeglib.h: No such file or directory`. On hosts without the headers, use `make image-build` / `make ci-run` — the Docker builder image bundles the full toolchain.
 
 ## Available Make Targets
 
@@ -54,40 +83,63 @@ Run `make help` to see all available targets.
 | Target | Description |
 |--------|-------------|
 | `make test` | Run tests with coverage |
-| `make lint` | Run Go linters and Dockerfile linting |
+| `make format` | Auto-format Go source code |
+| `make lint` | Run golangci-lint (gosec, gocritic, errorlint, …) and hadolint on all Dockerfiles |
+| `make lint-ci` | Lint GitHub Actions workflows with actionlint |
+| `make secrets` | Scan for hardcoded secrets with gitleaks |
+| `make trivy-fs` | Scan filesystem for vulnerabilities, secrets, and misconfigurations |
+| `make vulncheck` | Check for known vulnerabilities in Go dependencies (requires C toolchain) |
+| `make static-check` | Composite quality gate (lint-ci, lint, secrets, trivy-fs, deps-prune-check) |
 | `make update` | Update dependency packages to latest versions |
 
 ### Docker
 
 | Target | Description |
 |--------|-------------|
+| `make image-bootstrap` | Create Docker buildx multi-platform builder |
 | `make image-build` | Build Docker images via buildx |
 | `make image-run` | Run Docker images interactively |
-| `make image-bootstrap` | Create Docker buildx multi-platform builder |
-| `make docker-prune` | Prune Docker system and buildx cache |
-| `make docker-setup-multiarch` | Install binfmt handlers for multi-arch Docker |
-| `make run-ghcr-amd64` | Run GHCR runtime image on amd64 |
-| `make run-ghcr-arm64` | Run GHCR runtime image on arm64 |
+| `make image-prune` | Prune Docker system and buildx cache |
+| `make image-setup-multiarch` | Install binfmt handlers for multi-arch Docker |
+| `make image-run-ghcr-amd64` | Run GHCR runtime image on amd64 |
+| `make image-run-ghcr-arm64` | Run GHCR runtime image on arm64 |
 
 ### CI
 
 | Target | Description |
 |--------|-------------|
-| `make ci` | Run the full CI pipeline locally (deps, lint, test, build) |
+| `make ci` | Run the full CI pipeline locally (deps, static-check, test, build) |
 | `make ci-run` | Run GitHub Actions workflow locally using [act](https://github.com/nektos/act) |
+
+### Dependencies
+
+| Target | Description |
+|--------|-------------|
+| `make deps` | Verify required tool dependencies |
+| `make deps-act` | Install act for local CI |
+| `make deps-hadolint` | Install hadolint for Dockerfile linting |
+| `make deps-shellcheck` | Install shellcheck for shell script linting |
+| `make deps-actionlint` | Install actionlint for GitHub Actions workflow linting |
+| `make deps-gitleaks` | Install gitleaks for secret scanning |
+| `make deps-trivy` | Install Trivy for filesystem/image security scanning |
+| `make deps-govulncheck` | Install govulncheck for Go module vulnerability scanning |
+| `make deps-prune-check` | Verify go.mod and go.sum are tidy |
+
+### Release
+
+| Target | Description |
+|--------|-------------|
+| `make release` | Create and push a new semver tag |
+| `make tag-delete` | Delete a specific tag locally and remotely |
+| `make version` | Print current version (tag) |
 
 ### Utilities
 
 | Target | Description |
 |--------|-------------|
 | `make help` | List available targets |
-| `make deps` | Verify required tool dependencies |
-| `make deps-act` | Install act for local CI |
-| `make deps-hadolint` | Install hadolint for Dockerfile linting |
-| `make deps-prune-check` | Verify go.mod and go.sum are tidy |
-| `make version` | Print current version (tag) |
-| `make release` | Create and push a new semver tag |
-| `make tag-delete` | Delete a specific tag locally and remotely |
+| `make clean` | Remove build artifacts and generated files |
+| `make testdata` | Clone test data repository |
 | `make renovate-bootstrap` | Install nvm and npm for Renovate |
 | `make renovate-validate` | Validate Renovate configuration |
 
@@ -163,10 +215,27 @@ GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 
 | Job | Triggers | Steps |
 |-----|----------|-------|
-| **docker-image** | push, PR, tags | Build multi-arch Docker image; push to GHCR on tags only |
+| **docker** | push, PR, tags | Build + Trivy image scan + smoke test every push; publish multi-arch image (amd64, arm64, arm/v7) to GHCR on tags only |
 | **cleanup** | weekly (Sunday) | Remove old workflow runs via native `gh` CLI |
 
 Build and test happen inside the Docker multi-stage build (CGO/dlib dependencies are only available in the builder image).
+
+The `docker` job authenticates to GHCR using the built-in `GITHUB_TOKEN` — no additional repository secret is required. The workflow publishes bare semver Docker tags (`1.2.3`, `1.2`, `1`) derived from the `v`-prefixed git tag.
+
+### Pre-push image hardening
+
+The `docker` job runs the following gates **before** any image is pushed to GHCR. Any failure blocks the release; regressions in cross-compile targets surface on the commit that introduced them, not on release day.
+
+| # | Gate | Catches | Tool |
+|---|------|---------|------|
+| 1 | Build single-arch image locally | Build regressions on the runner architecture | `docker/build-push-action` with `load: true` |
+| 2 | **Trivy image scan** (CRITICAL/HIGH blocking) | CVEs in the base image, OS packages, build layers, leaked secrets, Dockerfile misconfigs | `aquasecurity/trivy-action` with `image-ref:` |
+| 3 | **Smoke test** | Image actually works — boots the CLI binary and runs the face-recognition pipeline against baked-in test data; exit 0 means dlib loaded, the recognizer initialised, and `result.jpg` was written | `docker run --entrypoint /app/main` |
+| 4 | Multi-arch build + conditional push | `linux/amd64`, `linux/arm64`, and `linux/arm/v7` cross-compile regressions. On tag push: publishes to GHCR. On non-tag push: validation-only. | `docker/build-push-action` with `push: ${{ startsWith(github.ref, 'refs/tags/') }}` |
+
+Buildkit in-manifest attestations (`provenance`, `sbom`) are deliberately disabled so the OCI image index stays free of `unknown/unknown` platform entries — this lets the GHCR Packages UI render the **"OS / Arch"** tab correctly on the package overview page.
+
+Runtime Dockerfiles (`Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtme*`) run as numeric UID `10001` in a non-root `app` group (K8s restricted-pod-security compatible).
 
 [Renovate](https://docs.renovatebot.com/) keeps dependencies up to date with platform automerge enabled.
 
