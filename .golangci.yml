@@ -1,15 +1,32 @@
 version: "2"
 
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/AndriyKalashnykov/go-face-recognition
+
 linters:
   default: standard
   enable:
+    - bodyclose
+    - errorlint
+    - goconst
     - gocritic
+    - gosec
+    - misspell
+    - noctx
 
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gosec:
+      excludes:
+        - G104  # unhandled errors — already covered by errcheck

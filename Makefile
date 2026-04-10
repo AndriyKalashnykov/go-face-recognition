@@ -1,15 +1,38 @@
+# Ensure tools installed to ~/.local/bin and $(GOPATH)/bin (hadolint, act,
+# gitleaks, actionlint, govulncheck, trivy, shellcheck, etc.) are on PATH for
+# every recipe — needed inside the act runner container where neither path is
+# preconfigured. Exported so every sub-shell the recipes spawn inherits it.
+export PATH := $(HOME)/.local/bin:$(HOME)/go/bin:$(PATH)
+
 # ──────────────────────────────────────────────────────────────
-# Tool versions (pinned)
+# Tool versions (pinned, Renovate-tracked via inline comments)
 # ──────────────────────────────────────────────────────────────
-NVM_VERSION      ?= 0.40.4
-NODE_VERSION     := 24
-GO_VER           ?= 1.26.2
-ACT_VERSION      := 0.2.87
-HADOLINT_VERSION := 2.14.0
-GOLANGCI_VERSION := 2.11.4
-DOCKER_PLATFORM  ?= linux/arm/v7
-BUILDER_IMAGE    ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
-IMAGE_REPO       ?= andriykalashnykov/go-face-recognition
+# renovate: datasource=github-releases depName=nvm-sh/nvm
+NVM_VERSION        := 0.40.4
+# Source of truth: .nvmrc (major version only, e.g. "24")
+NODE_VERSION       := $(shell cat .nvmrc 2>/dev/null || echo 24)
+# renovate: datasource=docker depName=golang
+GO_VER             := 1.26.2
+# renovate: datasource=github-releases depName=nektos/act
+ACT_VERSION        := 0.2.87
+# renovate: datasource=github-releases depName=hadolint/hadolint
+HADOLINT_VERSION   := 2.14.0
+# renovate: datasource=github-releases depName=golangci/golangci-lint
+GOLANGCI_VERSION   := 2.11.4
+# renovate: datasource=github-releases depName=rhysd/actionlint
+ACTIONLINT_VERSION := 1.7.12
+# renovate: datasource=github-releases depName=koalaman/shellcheck
+SHELLCHECK_VERSION := 0.11.0
+# renovate: datasource=github-releases depName=gitleaks/gitleaks
+GITLEAKS_VERSION   := 8.30.1
+# renovate: datasource=github-releases depName=aquasecurity/trivy
+TRIVY_VERSION      := 0.69.3
+# renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
+GOVULNCHECK_VERSION := 1.1.4
+
+DOCKER_PLATFORM    ?= linux/amd64
+BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
+IMAGE_REPO         ?= andriykalashnykov/go-face-recognition
 
 # ──────────────────────────────────────────────────────────────
 # Project metadata
@@ -19,6 +42,8 @@ CURRENTTAG      := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v
 NEWTAG          ?= $(shell bash -c 'read -p "Please provide a new tag (current tag - $(CURRENTTAG)): " newtag; echo $$newtag')
 SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 
+DOCKERFILES     := $(wildcard Dockerfile.*)
+
 .DEFAULT_GOAL := help
 
 # ──────────────────────────────────────────────────────────────
@@ -27,12 +52,12 @@ SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 
 #help: @ List available targets
 help:
-	@grep -E '^#[a-zA-Z0-9_-]+:.*@' $(MAKEFILE_LIST) | sort | sed 's/^#//' | awk 'BEGIN {FS = ": *@ *"}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^#[a-zA-Z0-9_-]+:.*@' $(MAKEFILE_LIST) | sort | sed 's/^#//' | awk 'BEGIN {FS = ": *@ *"}; {printf "\033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 #deps: @ Verify required tool dependencies
 deps:
-	@command -v go   >/dev/null 2>&1 || { echo "ERROR: go is not installed";   exit 1; }
-	@command -v git  >/dev/null 2>&1 || { echo "ERROR: git is not installed";  exit 1; }
+	@command -v go     >/dev/null 2>&1 || { echo "ERROR: go is not installed";     exit 1; }
+	@command -v git    >/dev/null 2>&1 || { echo "ERROR: git is not installed";    exit 1; }
 	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed"; exit 1; }
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint v$(GOLANGCI_VERSION)..."; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $$(go env GOPATH)/bin v$(GOLANGCI_VERSION); }
@@ -41,16 +66,53 @@ deps:
 #deps-act: @ Install act for local CI
 deps-act: deps
 	@command -v act >/dev/null 2>&1 || { echo "Installing act $(ACT_VERSION)..."; \
-		curl -sSfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin v$(ACT_VERSION); \
+		mkdir -p $$HOME/.local/bin; \
+		curl -sSfL https://raw.githubusercontent.com/nektos/act/master/install.sh | bash -s -- -b $$HOME/.local/bin v$(ACT_VERSION); \
 	}
 
 #deps-hadolint: @ Install hadolint for Dockerfile linting
 deps-hadolint:
 	@command -v hadolint >/dev/null 2>&1 || { echo "Installing hadolint $(HADOLINT_VERSION)..."; \
+		mkdir -p $$HOME/.local/bin; \
 		curl -sSfL -o /tmp/hadolint https://github.com/hadolint/hadolint/releases/download/v$(HADOLINT_VERSION)/hadolint-Linux-x86_64 && \
-		install -m 755 /tmp/hadolint /usr/local/bin/hadolint && \
+		install -m 755 /tmp/hadolint $$HOME/.local/bin/hadolint && \
 		rm -f /tmp/hadolint; \
 	}
+
+#deps-shellcheck: @ Install shellcheck for shell script linting
+deps-shellcheck:
+	@command -v shellcheck >/dev/null 2>&1 || { echo "Installing shellcheck $(SHELLCHECK_VERSION)..."; \
+		mkdir -p $$HOME/.local/bin; \
+		curl -sSfL -o /tmp/shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).linux.x86_64.tar.xz && \
+		tar -xJf /tmp/shellcheck.tar.xz -C /tmp && \
+		install -m 755 /tmp/shellcheck-v$(SHELLCHECK_VERSION)/shellcheck $$HOME/.local/bin/shellcheck && \
+		rm -rf /tmp/shellcheck-v$(SHELLCHECK_VERSION) /tmp/shellcheck.tar.xz; \
+	}
+
+#deps-actionlint: @ Install actionlint for GitHub Actions workflow linting
+deps-actionlint: deps deps-shellcheck
+	@command -v actionlint >/dev/null 2>&1 || { echo "Installing actionlint $(ACTIONLINT_VERSION)..."; \
+		go install github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLINT_VERSION); }
+
+#deps-gitleaks: @ Install gitleaks for secret scanning
+deps-gitleaks:
+	@command -v gitleaks >/dev/null 2>&1 || { echo "Installing gitleaks $(GITLEAKS_VERSION)..."; \
+		mkdir -p $$HOME/.local/bin; \
+		curl -sSfL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$(GITLEAKS_VERSION)/gitleaks_$(GITLEAKS_VERSION)_linux_x64.tar.gz && \
+		tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks && \
+		install -m 755 /tmp/gitleaks $$HOME/.local/bin/gitleaks && \
+		rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks; \
+	}
+
+#deps-trivy: @ Install Trivy for filesystem and image security scanning
+deps-trivy: deps
+	@command -v trivy >/dev/null 2>&1 || { echo "Installing trivy $(TRIVY_VERSION)..."; \
+		curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b $$(go env GOPATH)/bin v$(TRIVY_VERSION); }
+
+#deps-govulncheck: @ Install govulncheck for Go module vulnerability scanning
+deps-govulncheck: deps
+	@command -v govulncheck >/dev/null 2>&1 || { echo "Installing govulncheck $(GOVULNCHECK_VERSION)..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION); }
 
 #clean: @ Remove build artifacts and generated files
 clean:
@@ -84,10 +146,42 @@ build-arm64: deps
 		GOARCH=arm64 \
 		go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
-#lint: @ Run Go linters and Dockerfile linting
+#format: @ Auto-format Go source code
+format: deps
+	@gofmt -s -w .
+	@go mod tidy
+
+#lint: @ Run Go linters (golangci-lint with gosec/gocritic/errorlint) and hadolint
 lint: deps deps-hadolint
 	@golangci-lint run ./...
-	@hadolint Dockerfile.go-face
+	@for f in $(DOCKERFILES); do echo "hadolint $$f"; hadolint $$f || exit 1; done
+
+#lint-ci: @ Lint GitHub Actions workflows with actionlint
+lint-ci: deps-actionlint
+	@actionlint
+
+#secrets: @ Scan for hardcoded secrets with gitleaks
+secrets: deps-gitleaks
+	@gitleaks detect --source . --verbose --redact
+
+#trivy-fs: @ Scan filesystem for vulnerabilities, secrets, and misconfigurations
+trivy-fs: deps-trivy
+	@trivy fs --scanners vuln,secret,misconfig --severity CRITICAL,HIGH .
+
+#vulncheck: @ Check for known vulnerabilities in Go dependencies (requires C toolchain)
+vulncheck: deps-govulncheck
+	@govulncheck ./...
+
+# NOTE: `vulncheck` is intentionally NOT included in `static-check`.
+# govulncheck loads packages via `go build`, which for this project requires
+# the full CGO toolchain (libjpeg-dev, libdlib-dev, libopenblas-dev, …) to
+# compile the go-face / dlib bindings. On hosts without those headers the
+# target fails early with "jpeglib.h: No such file or directory". Run it
+# manually inside the builder Docker image, or once the C deps are installed.
+# Tracked in CLAUDE.md "Upgrade Backlog" as "Add govulncheck as Docker CI step".
+#static-check: @ Composite quality gate (lint-ci, lint, secrets, trivy-fs, deps-prune-check)
+static-check: lint-ci lint secrets trivy-fs deps-prune-check
+	@echo "Static check passed."
 
 #run: @ Run the application locally
 run: deps
@@ -136,27 +230,27 @@ image-run:
 	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-runtime /bin/sh
 	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-go-face /bin/sh
 
-#version: @ Print current version (tag)
-version:
-	@echo $(CURRENTTAG)
-
-#docker-prune: @ Prune Docker system and buildx cache
-docker-prune:
+#image-prune: @ Prune Docker system and buildx cache
+image-prune:
 	@docker system prune
 	@docker buildx prune
 
-#docker-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
-docker-setup-multiarch:
+#image-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
+image-setup-multiarch:
 	@docker run --privileged --rm tonistiigi/binfmt --install all
 	@docker run -it --rm --platform linux/arm64 arm64v8/ubuntu sh
 
-#run-ghcr-amd64: @ Run GHCR runtime image on amd64
-run-ghcr-amd64:
+#image-run-ghcr-amd64: @ Run GHCR runtime image on amd64
+image-run-ghcr-amd64:
 	@docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
 
-#run-ghcr-arm64: @ Run GHCR runtime image on arm64
-run-ghcr-arm64:
+#image-run-ghcr-arm64: @ Run GHCR runtime image on arm64
+image-run-ghcr-arm64:
 	@docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
+
+#version: @ Print current version (tag)
+version:
+	@echo $(CURRENTTAG)
 
 #tag-delete: @ Delete a specific tag locally and remotely
 tag-delete:
@@ -177,8 +271,8 @@ deps-prune-check: deps
 	@rm -f go.mod.bak go.sum.bak
 	@echo "go.mod/go.sum are tidy."
 
-#ci: @ Run the full CI pipeline locally (deps, lint, test, build)
-ci: deps lint test build deps-prune-check
+#ci: @ Run the full CI pipeline locally (deps, static-check, test, build)
+ci: deps static-check test build
 	@echo "CI pipeline passed."
 
 #ci-run: @ Run GitHub Actions workflow locally using act
@@ -200,7 +294,10 @@ renovate-bootstrap:
 renovate-validate: renovate-bootstrap
 	@npx --yes renovate --platform=local
 
-.PHONY: help deps deps-act deps-hadolint clean testdata test build build-arm64 \
-        lint run update release image-bootstrap image-build image-run version \
-        docker-prune docker-setup-multiarch run-ghcr-amd64 run-ghcr-arm64 \
-        tag-delete ci ci-run renovate-bootstrap renovate-validate deps-prune-check
+.PHONY: help deps deps-act deps-hadolint deps-shellcheck deps-actionlint \
+        deps-gitleaks deps-trivy deps-govulncheck clean testdata test build \
+        build-arm64 format lint lint-ci secrets trivy-fs vulncheck static-check \
+        run update release image-bootstrap image-build image-run image-prune \
+        image-setup-multiarch image-run-ghcr-amd64 image-run-ghcr-arm64 \
+        version tag-delete ci ci-run renovate-bootstrap renovate-validate \
+        deps-prune-check
