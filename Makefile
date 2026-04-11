@@ -36,7 +36,7 @@ DOCKER_PLATFORM    ?= linux/amd64
 # lineage locally instead, pass BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face/dlib19:<tag>
 # (see CLAUDE.md "Build Notes" for details). Tracked by the dedicated
 # `go-face builder image (Makefile default)` Renovate custom regex manager.
-BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2
+BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4
 IMAGE_REPO         ?= andriykalashnykov/go-face-recognition
 
 # ──────────────────────────────────────────────────────────────
@@ -191,8 +191,8 @@ e2e: deps
 # as GitHub Actions. When a lineage is added or bumped upstream, update both
 # this block AND the ci.yml matrix in the same PR (Renovate's
 # "go-face builder images" group rule collapses the bumps into one PR).
-BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:57141e2e52ed280b90bae775c6945b2d4a2afa9dc1806be1f2633c46fd6d9b02
-BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2@sha256:d54649b6d2686cf2498cbe0abba3bc1d970ca44285cf3e13ca9b169fb867b962
+BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@sha256:c30c97c5d5a664d5f711f17d81a65d9558e17eeb73c0d7a76ff8dc11f6d1d958
+BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.4@sha256:4711c37c29f7af3623297b8a28fa135ed7f7e001d5688661916921bde7948c51
 
 #image-verify: @ Build + smoke-test Dockerfile.go-face against every CI matrix lineage
 # This is the local equivalent of the docker job's GATE 1 (build-for-scan) +
