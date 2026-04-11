@@ -464,20 +464,17 @@ jobs:
         working-directory: artifacts
         run: |
           set -euo pipefail
-          # cosign v3.x defaults to --new-bundle-format which emits a
-          # single `*.sigstore.json` instead of separate .sig + .pem
-          # files, and silently ignores --output-signature /
-          # --output-certificate. Force the legacy dual-file output so
-          # downstream consumers verifying with the older
-          #
-          #   cosign verify-blob --certificate ... --signature ... file
-          #
-          # flow (documented in README) still work without pulling a
-          # bundle-format-aware cosign.
+          # cosign v3.x deprecates the legacy dual-file
+          # (.sig + .pem) output in favour of a single bundle file
+          # that packages signature, certificate, and rekor entry
+          # together. Use the new format — it's the only flow cosign
+          # 3.x officially supports with --signing-config, and it
+          # simplifies the consumer's verify step from three files
+          # to one. `cosign verify-blob --bundle` has been available
+          # since cosign 2.x, so this is backward-compatible with
+          # any modern cosign installation.
           cosign sign-blob --yes \
-            --new-bundle-format=false \
-            --output-signature checksums.txt.sig \
-            --output-certificate checksums.txt.pem \
+            --bundle checksums.txt.sigstore.json \
             checksums.txt
           echo
           echo "=== signed release bundle ==="
@@ -511,7 +508,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --clobber \
             -- \
-            *.tar.gz checksums.txt checksums.txt.sig checksums.txt.pem
+            ./*.tar.gz checksums.txt checksums.txt.sigstore.json
           echo
           echo "=== release assets uploaded to ${TAG} ==="
           gh release view "${TAG}" --repo "${{ github.repository }}" \

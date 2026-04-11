@@ -383,8 +383,8 @@ go-face-recognition_<version>_linux_amd64-dlib19.tar.gz     # dlib19 secondary
 go-face-recognition_<version>_linux_arm64-dlib19.tar.gz     # dlib19 secondary
 go-face-recognition_<version>_linux_armv7-dlib19.tar.gz     # dlib19 secondary
 checksums.txt                                               # sha256 of every tarball
-checksums.txt.sig                                           # cosign signature
-checksums.txt.pem                                           # signing certificate
+checksums.txt.sigstore.json                                 # cosign bundle
+                                                            # (signature + certificate + rekor entry)
 ```
 
 Each tarball is **fully self-contained** — it includes the
@@ -409,16 +409,16 @@ VERSION=1.2.3
 ARCH=linux_arm64
 URL=https://github.com/AndriyKalashnykov/go-face-recognition/releases/download/v${VERSION}
 
-# Fetch the tarball and the full signed checksum bundle
+# Fetch the tarball and the signed checksum bundle
 curl -fsSLO "${URL}/go-face-recognition_${VERSION}_${ARCH}.tar.gz"
 curl -fsSLO "${URL}/checksums.txt"
-curl -fsSLO "${URL}/checksums.txt.sig"
-curl -fsSLO "${URL}/checksums.txt.pem"
+curl -fsSLO "${URL}/checksums.txt.sigstore.json"
 
-# Verify the checksum file was signed by this repo's GitHub Actions workflow
+# Verify the checksum file was signed by this repo's GitHub Actions workflow.
+# The .sigstore.json bundle packages the signature, the ephemeral signing
+# certificate, and the Rekor transparency log entry in a single file.
 cosign verify-blob \
-  --certificate       checksums.txt.pem \
-  --signature         checksums.txt.sig \
+  --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp 'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
   --certificate-oidc-issuer    https://token.actions.githubusercontent.com \
   checksums.txt
