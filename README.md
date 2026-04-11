@@ -12,12 +12,13 @@ Facial recognition system built in Go, based on FaceNet principles. Uses the [go
 | Language          | Go 1.26.2 (CGO enabled)                          |
 | Face Recognition  | go-face (fork of Kagami/go-face, dlib C++)       |
 | Image Processing  | golang.org/x/image (font/opentype for TTF)       |
-| Container         | Docker multi-arch buildx (amd64, arm64, arm/v7)  |
+| Container         | Docker multi-arch buildx (amd64, arm64, arm/v7); built against upstream `go-face/dlib19` + `go-face/dlib20` builder matrix |
 | Registry          | GHCR (ghcr.io/andriykalashnykov/go-face-recognition) |
+| Image signing     | cosign keyless OIDC (Sigstore Fulcio → Rekor, tag-only) |
 | CI                | GitHub Actions                                   |
 | Linting           | golangci-lint (gosec, gocritic, errorlint, …), hadolint, actionlint |
-| Security scanning | gitleaks (secrets), Trivy (fs), govulncheck (Go CVEs) |
-| Dependency updates| Renovate                                         |
+| Security scanning | gitleaks (secrets), Trivy (fs + image), govulncheck (Go CVEs) |
+| Dependency updates| Renovate (+ scheduled upstream lineage discovery) |
 
 ## Quick Start
 
@@ -121,7 +122,7 @@ Run `make help` to see all available targets.
 | `make deps-shellcheck` | Install shellcheck for shell script linting |
 | `make deps-actionlint` | Install actionlint for GitHub Actions workflow linting |
 | `make deps-gitleaks` | Install gitleaks for secret scanning |
-| `make deps-trivy` | Install Trivy for filesystem/image security scanning |
+| `make deps-trivy` | Install Trivy for filesystem and image security scanning |
 | `make deps-govulncheck` | Install govulncheck for Go module vulnerability scanning |
 | `make deps-prune-check` | Verify go.mod and go.sum are tidy |
 
@@ -138,8 +139,6 @@ Run `make help` to see all available targets.
 | Target | Description |
 |--------|-------------|
 | `make help` | List available targets |
-| `make clean` | Remove build artifacts and generated files |
-| `make testdata` | Clone test data repository |
 | `make renovate-bootstrap` | Install nvm and npm for Renovate |
 | `make renovate-validate` | Validate Renovate configuration |
 
@@ -213,18 +212,19 @@ make build-arm64
 
 GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 
-| Job | Triggers | Steps |
-|-----|----------|-------|
-| **docker** | push, PR, tags | Build + Trivy image scan + smoke test every push; publish multi-arch image (amd64, arm64, arm/v7) to GHCR on tags only |
-| **cleanup** | weekly (Sunday) | Remove old workflow runs via native `gh` CLI |
+| Workflow | Triggers | Summary |
+|----------|----------|---------|
+| **ci** (`docker` job) | push, PR, tags | `strategy.matrix` over every supported upstream `go-face` dlib major lineage (currently `dlib19` + `dlib20`). Each matrix cell runs the full five-gate hardening pipeline (build + Trivy image scan + smoke test + multi-arch build + cosign signing) independently with its own GHA cache scope. Publishes multi-arch image (amd64, arm64, arm/v7) to GHCR on tag pushes only. |
+| **cleanup-runs** | weekly (Sunday 00:00 UTC), `workflow_dispatch` | Remove old workflow runs via native `gh` CLI |
+| **discover-go-face-lineages** | weekly (Monday 06:00 UTC), `workflow_dispatch` | Scan upstream `ghcr.io/andriykalashnykov/go-face/dlib*` via the anonymous Docker Registry v2 token flow, diff against the lineages currently pinned in `ci.yml`, and open one idempotent discovery issue per new lineage with the latest semver tag + immutable manifest digest pre-filled. Cites the "Adding a new go-face dlib lineage" playbook in [`CLAUDE.md`](CLAUDE.md). No auto-PR or auto-merge — chain of trust preserved. |
 
 Build and test happen inside the Docker multi-stage build (CGO/dlib dependencies are only available in the builder image).
 
-The `docker` job authenticates to GHCR using the built-in `GITHUB_TOKEN` — no additional repository secret is required. The workflow publishes bare semver Docker tags (`1.2.3`, `1.2`, `1`) derived from the `v`-prefixed git tag.
+The `docker` job authenticates to GHCR using the built-in `GITHUB_TOKEN` — no additional repository secret is required. The **primary** lineage (`dlib20`) owns the unsuffixed bare-semver Docker tags (`1.2.3`, `1.2`, `1`, `latest`) derived from the `v`-prefixed git tag. **Non-primary** lineages publish suffixed tags (e.g. `1.2.3-dlib19`, `1.2-dlib19`, `latest-dlib19`) so consumers can explicitly target an older dlib ABI when needed. Cosign signs each `tag@digest` per lineage.
 
 ### Pre-push image hardening
 
-The `docker` job runs the following gates **before** any image is pushed to GHCR. Any failure blocks the release; regressions in cross-compile targets surface on the commit that introduced them, not on release day.
+Each cell of the `docker` job's dlib lineage matrix runs the following gates **before** any image is pushed to GHCR. Any failure in any cell blocks the release (`fail-fast: false` so dlib19 and dlib20 fail independently); regressions in cross-compile targets or in either upstream lineage surface on the commit that introduced them, not on release day. Each cell uses its own GHA cache scope (`dlib19` / `dlib20`) so layers don't evict each other, and its own scan/smoke-test container names so concurrent cells don't collide.
 
 | # | Gate | Catches | Tool |
 |---|------|---------|------|

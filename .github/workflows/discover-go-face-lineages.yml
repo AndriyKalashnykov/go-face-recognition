@@ -1,0 +1,262 @@
+name: Discover go-face dlib lineages
+
+# Scheduled weekly scan for newly-published upstream
+# ghcr.io/andriykalashnykov/go-face/dlib<N> lineages that are not yet in this
+# repo's CI matrix. When a new lineage is found, opens one idempotent
+# discovery issue per lineage with the latest semver tag and immutable
+# manifest digest pre-filled. The issue cites the "Adding a new go-face dlib
+# lineage" playbook in CLAUDE.md — a human (or Claude when explicitly asked
+# to triage) applies the 4-step playbook to wire the lineage in.
+#
+# This workflow intentionally does NOT modify the matrix, open a PR, or
+# pre-decide primary designation — the chain of trust (pinned digests,
+# cosign keyless signing, Trivy blocking gate) requires a maintainer review
+# before the first build against a new upstream lineage is published.
+
+on:
+  schedule:
+    # Monday 06:00 UTC — early enough to land in Monday morning triage,
+    # late enough to avoid weekend upstream churn.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Never cancel a run that is mid-issue-creation; discovery is idempotent
+  # but issue creation is a write operation we don't want to interrupt.
+  group: discover-go-face-lineages
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPSTREAM_REPO: andriykalashnykov/go-face
+      SCAN_MIN: '15'
+      SCAN_MAX: '40'
+    steps:
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # ----------------------------------------------------------------
+      # Detect: enumerate upstream lineages on GHCR via the anonymous
+      # Docker Registry v2 token flow (no GitHub auth required since the
+      # packages are public), diff against lineages currently pinned in
+      # ci.yml, and emit the set difference.
+      # ----------------------------------------------------------------
+      - name: Detect new go-face dlib lineages upstream
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current=$(grep -oE 'ghcr\.io/andriykalashnykov/go-face/dlib[0-9]+' \
+            .github/workflows/ci.yml \
+            | sed -E 's|.*/dlib||' \
+            | sort -un)
+          echo "current lineages in matrix: $(echo "${current}" | tr '\n' ' ')"
+
+          upstream=""
+          for major in $(seq "${SCAN_MIN}" "${SCAN_MAX}"); do
+            pkg="${UPSTREAM_REPO}/dlib${major}"
+            token=$(curl -fsS \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${pkg}:pull" 2>/dev/null \
+              | jq -r '.token // empty' || true)
+            [ -z "${token}" ] && continue
+            status=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${token}" \
+              "https://ghcr.io/v2/${pkg}/tags/list" || true)
+            if [ "${status}" = "200" ]; then
+              upstream+="${major}"$'\n'
+            fi
+          done
+          upstream=$(printf '%s' "${upstream}" | sed '/^$/d' | sort -un)
+          echo "upstream lineages on GHCR: $(echo "${upstream}" | tr '\n' ' ')"
+
+          # set difference: upstream \ current
+          new_lineages=$(comm -23 \
+            <(printf '%s\n' "${upstream}") \
+            <(printf '%s\n' "${current}") \
+            | sed '/^$/d' || true)
+
+          {
+            echo "## go-face lineage discovery"
+            echo
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Current in matrix | \`$(echo "${current}" | paste -sd, -)\` |"
+            echo "| Upstream on GHCR  | \`$(echo "${upstream}" | paste -sd, -)\` |"
+            echo "| New (not yet tracked) | \`$(echo "${new_lineages}" | paste -sd, -)\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ -z "${new_lineages}" ]; then
+            echo "no new lineages detected"
+            echo "has_new=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "new lineages detected: $(echo "${new_lineages}" | tr '\n' ' ')"
+          echo "has_new=true" >> "${GITHUB_OUTPUT}"
+          {
+            echo "new_lineages<<EOF"
+            echo "${new_lineages}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      # ----------------------------------------------------------------
+      # Resolve: for each new lineage, pick the highest semver tag and
+      # resolve it to an immutable manifest digest. Lineages with no
+      # semver tag (e.g. only `latest`) or no resolvable digest are
+      # skipped with a warning — they'll be retried on the next cron.
+      # ----------------------------------------------------------------
+      - name: Resolve latest tag + digest for each new lineage
+        if: steps.detect.outputs.has_new == 'true'
+        id: resolve
+        shell: bash
+        env:
+          NEW_LINEAGES: ${{ steps.detect.outputs.new_lineages }}
+        run: |
+          set -euo pipefail
+
+          details=""
+          while IFS= read -r major; do
+            [ -z "${major}" ] && continue
+            pkg="${UPSTREAM_REPO}/dlib${major}"
+            token=$(curl -fsS \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${pkg}:pull" \
+              | jq -r .token)
+
+            latest_tag=$(curl -fsS -H "Authorization: Bearer ${token}" \
+              "https://ghcr.io/v2/${pkg}/tags/list" \
+              | jq -r '.tags[]' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -1 || true)
+
+            if [ -z "${latest_tag}" ]; then
+              echo "WARNING: no semver tag found for dlib${major}, skipping"
+              continue
+            fi
+
+            digest=$(curl -fsSI \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              "https://ghcr.io/v2/${pkg}/manifests/${latest_tag}" \
+              | awk 'tolower($1) == "docker-content-digest:" {print $2}' \
+              | tr -d '\r' \
+              | head -1 || true)
+
+            if [ -z "${digest}" ]; then
+              echo "WARNING: no digest header for dlib${major}:${latest_tag}, skipping"
+              continue
+            fi
+
+            details+="dlib${major}|${latest_tag}|${digest}"$'\n'
+          done <<< "${NEW_LINEAGES}"
+
+          if [ -z "${details}" ]; then
+            echo "no resolvable lineages after digest lookup"
+            echo "has_resolved=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "has_resolved=true" >> "${GITHUB_OUTPUT}"
+          {
+            echo "details<<EOF"
+            echo "${details}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      # ----------------------------------------------------------------
+      # Publish: open one discovery issue per new lineage. Idempotent by
+      # exact title match — a second cron run while the previous issue
+      # is still open will log "skipping" and not duplicate.
+      #
+      # Uses a quoted heredoc template + sed placeholder substitution
+      # so the template body never undergoes shell expansion (no risk
+      # of backtick/dollar injection from upstream tag names).
+      # ----------------------------------------------------------------
+      - name: Open discovery issue per new lineage
+        if: steps.resolve.outputs.has_resolved == 'true'
+        shell: bash
+        env:
+          DETAILS: ${{ steps.resolve.outputs.details }}
+        run: |
+          set -euo pipefail
+
+          while IFS='|' read -r lineage tag digest; do
+            [ -z "${lineage}" ] && continue
+            title="chore: new go-face lineage detected — ${lineage}"
+
+            existing=$(gh issue list \
+              --search "\"${title}\" in:title" \
+              --state open \
+              --json number \
+              --jq 'length')
+            if [ "${existing}" -gt 0 ]; then
+              echo "issue for ${lineage} already open, skipping"
+              continue
+            fi
+
+            cat > /tmp/body.md <<'TEMPLATE'
+          Upstream `AndriyKalashnykov/go-face` has published a new dlib lineage that is not yet wired into this repo's CI matrix.
+
+          | Field | Value |
+          |-------|-------|
+          | Lineage | `__LINEAGE__` |
+          | Latest tag | `__TAG__` |
+          | Digest | `__DIGEST__` |
+          | Image ref | `ghcr.io/andriykalashnykov/go-face/__LINEAGE__:__TAG__@__DIGEST__` |
+          | GHCR page | https://github.com/AndriyKalashnykov/go-face/pkgs/container/go-face%2F__LINEAGE__ |
+
+          ## Action required
+
+          Follow the **"Adding a new go-face dlib lineage"** playbook in [`CLAUDE.md`](../blob/main/CLAUDE.md#adding-a-new-go-face-dlib-lineage). Summary of the four steps:
+
+          1. Append a new `include:` entry to `strategy.matrix.include` in `.github/workflows/ci.yml` with the image ref above, `primary: false`, `suffix: '-__LINEAGE__'`.
+          2. Append `ghcr.io/andriykalashnykov/go-face/__LINEAGE__` to `matchDepNames` in the `go-face builder images` `packageRules` entry in `renovate.json`.
+          3. **Decide** whether `__LINEAGE__` should become the new primary lineage (shifts `latest` / unsuffixed tags). Default: **keep the existing primary**, i.e. leave `primary: false`. Flip only if the rubric in the CLAUDE.md playbook is fully satisfied — this is a maintainer judgment call and is intentionally not automated.
+          4. Update `CLAUDE.md` CI/CD section, Build Notes, and Upgrade Backlog.
+
+          ## Verification before committing
+
+          ```bash
+          make lint-ci
+          npx --yes --package renovate -- renovate-config-validator renovate.json
+          make -n image-build
+          ```
+
+          ## Closure
+
+          Close this issue via the commit footer:
+
+          ```
+          feat(ci): add go-face/__LINEAGE__ lineage to matrix
+
+          Closes #<this-issue-number>
+          ```
+
+          ---
+
+          _Opened automatically by `.github/workflows/discover-go-face-lineages.yml`. If this lineage is intentionally skipped (preview release, known incompatibility, policy decision), leave a comment explaining why before closing — it becomes the audit trail for the next cron run._
+          TEMPLATE
+
+            sed -i \
+              -e "s|__LINEAGE__|${lineage}|g" \
+              -e "s|__TAG__|${tag}|g" \
+              -e "s|__DIGEST__|${digest}|g" \
+              /tmp/body.md
+
+            gh issue create \
+              --title "${title}" \
+              --body-file /tmp/body.md \
+              --label "dependencies"
+
+            echo "opened discovery issue for ${lineage}"
+          done <<< "${DETAILS}"

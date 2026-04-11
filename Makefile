@@ -31,7 +31,12 @@ TRIVY_VERSION      := 0.69.3
 GOVULNCHECK_VERSION := 1.1.4
 
 DOCKER_PLATFORM    ?= linux/amd64
-BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face:v0.0.3
+# Primary builder lineage for local `make image-build` — matches the CI matrix
+# primary cell in .github/workflows/ci.yml. To build against the dlib19
+# lineage locally instead, pass BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face/dlib19:<tag>
+# (see CLAUDE.md "Build Notes" for details). Tracked by the dedicated
+# `go-face builder image (Makefile default)` Renovate custom regex manager.
+BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2
 IMAGE_REPO         ?= andriykalashnykov/go-face-recognition
 
 # ──────────────────────────────────────────────────────────────
@@ -217,7 +222,8 @@ image-bootstrap:
 image-build:
 	@docker buildx use multi-platform-builder
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.go-face \
-		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-go-face .
+		--build-arg GO_VER=$(GO_VER) --build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
+		-t $(IMAGE_REPO):latest-go-face .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.ubuntu.builder \
 		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-builder .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.alpine.runtme.local \

@@ -53,6 +53,31 @@ jobs:
       packages: write       # registry push to GHCR (only exercised on tag pushes)
       id-token: write       # cosign keyless OIDC (Sigstore Fulcio — only exercised on tag pushes)
 
+    # ----------------------------------------------------------------
+    # Matrix: build, scan, smoke-test, publish, and sign the image
+    # against EVERY supported dlib-docker major lineage that upstream
+    # go-face publishes. A regression in either lineage is caught on
+    # the commit that introduced it.
+    #
+    # Primary lineage (unsuffixed tags → `latest`): dlib20.
+    # Non-primary lineage publishes suffixed tags (e.g. `1.2.3-dlib19`).
+    #
+    # `fail-fast: false` so dlib19 and dlib20 fail independently.
+    # Cache scope is per-lineage so layers don't evict each other.
+    # ----------------------------------------------------------------
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dlib_major: '20'
+            suffix: ''
+            primary: true
+            builder: 'ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:349946e5ff74011a27f010d6250800b3c1506acfb3a452e941f2cdb2cbd7d750'
+          - dlib_major: '19'
+            suffix: '-dlib19'
+            primary: false
+            builder: 'ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2@sha256:694ce629ba44265cc0d378a1137bce57cba94b9e5ca27cd7c1be5a5f5fc61872'
+
     steps:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -75,8 +100,13 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
         with:
           images: ghcr.io/${{ env.OWNER_LC }}/go-face-recognition
+          # Primary cell (dlib20) owns unsuffixed tags + `latest`.
+          # Non-primary cells append their suffix to every tag, incl. `latest`
+          # (so the dlib19 cell publishes `latest-dlib19`, not a bare `latest`).
+          # Blank second flavor line for the primary cell is a harmless no-op.
           flavor: |
-            latest=${{ startsWith(github.ref, 'refs/tags/') }}
+            latest=${{ matrix.primary && startsWith(github.ref, 'refs/tags/') }}
+            ${{ matrix.suffix && format('suffix={0},onlatest=true', matrix.suffix) || '' }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -93,9 +123,11 @@ jobs:
             io.artifacthub.package.license=MIT
 
       # ----------------------------------------------------------------
-      # GATE 1: Single-arch load-local build (every push).
+      # GATE 1: Single-arch load-local build (every push, per matrix cell).
       # Loads the image into the local Docker daemon so the Trivy image
-      # scan and smoke test can exercise a real, built image.
+      # scan and smoke test can exercise a real, built image. Scan tag is
+      # cell-scoped so concurrent matrix cells don't overwrite each other.
+      # Cache scope is per-lineage to prevent dlib19/dlib20 layer eviction.
       # ----------------------------------------------------------------
       - name: Build image for scan
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
@@ -104,11 +136,11 @@ jobs:
           file: ./Dockerfile.go-face
           platforms: linux/amd64
           load: true
-          tags: go-face-recognition:scan
+          tags: go-face-recognition:scan-dlib${{ matrix.dlib_major }}
           build-args: |
-            BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            BUILDER_IMAGE=${{ matrix.builder }}
+          cache-from: type=gha,scope=dlib${{ matrix.dlib_major }}
+          cache-to: type=gha,mode=max,scope=dlib${{ matrix.dlib_major }}
 
       # ----------------------------------------------------------------
       # GATE 2: Trivy image scan — CRITICAL/HIGH blocking (every push).
@@ -119,7 +151,7 @@ jobs:
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref: 'go-face-recognition:scan'
+          image-ref: 'go-face-recognition:scan-dlib${{ matrix.dlib_major }}'
           scanners: 'vuln,secret,misconfig'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
@@ -136,13 +168,13 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
-          timeout 60s docker run --name=smoke-test --rm \
+          timeout 60s docker run --name=smoke-test-dlib${{ matrix.dlib_major }} --rm \
             --entrypoint /app/main \
-            go-face-recognition:scan
+            go-face-recognition:scan-dlib${{ matrix.dlib_major }}
 
       - name: Cleanup smoke container
         if: always()
-        run: docker rm -f smoke-test 2>/dev/null || true
+        run: docker rm -f smoke-test-dlib${{ matrix.dlib_major }} 2>/dev/null || true
 
       # ----------------------------------------------------------------
       # GATE 4: Multi-arch build. ALWAYS runs (catches arm64/arm/v7
@@ -166,14 +198,14 @@ jobs:
           file: ./Dockerfile.go-face
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
-            BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face:v0.0.3
+            BUILDER_IMAGE=${{ matrix.builder }}
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           provenance: false
           sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=dlib${{ matrix.dlib_major }}
+          cache-to: type=gha,mode=max,scope=dlib${{ matrix.dlib_major }}
 
       # ----------------------------------------------------------------
       # GATE 5: Cosign keyless OIDC signing — tag-only.
