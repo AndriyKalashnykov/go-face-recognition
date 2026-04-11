@@ -142,6 +142,23 @@ Last reviewed: 2026-04-11
 - [x] ~~`Dockerfile.dlib-docker-go` references deleted `dlib-docker:v20.0.0@sha256:199cece5...`~~ (done 2026-04-11 — both tag and digest were gone from GHCR. Repointed at the rebuilt `dlib-docker:20.0.1` digest published in Phase 1 of the libdlib.a fix chain)
 - [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
 
+## GHCR package cleanup — gotchas
+
+If you ever need to clean up a stale / test / broken `go-face-recognition` package state in GHCR (e.g. after a dry-run release, a miscut tag, or a compromised image), the key API gotchas learned 2026-04-11:
+
+1. **Per-version delete is rate-limited by a 5000-downloads policy.**
+   `DELETE /user/packages/container/go-face-recognition/versions/{id}`
+   returns HTTP 400
+   `Publicly visible package versions with more than 5000 downloads cannot be deleted. Contact GitHub support for further assistance.`
+   The counter is aggregated at the blob (layer) level, so a package version whose layer digests happen to be shared with any popular public image (alpine, ubuntu, go runtime base layers, …) will hit this cap even for a brand-new test tag.
+
+2. **Whole-package delete is NOT subject to that cap.**
+   `DELETE /user/packages/container/go-face-recognition` (no `/versions/{id}`) succeeds silently even when individual versions inside it are above 5000 downloads. This is the escape hatch for stuck orphaned manifests in a test cleanup.
+
+3. **After whole-package delete**, the package URL returns HTTP 404 and the GHCR Packages UI at `https://github.com/<owner>/<repo>/pkgs/container/<name>` is dead until the next `v*` tag push recreates the package fresh with real tagged versions.
+
+4. **Cosign signature artifacts** are stored as separate tagged versions under the same package (tag format: `sha256-<hex>[.sig|.att]`). When you delete a parent manifest, the signature versions do NOT cascade — they become orphaned tagged versions that still show up in the "Recent tagged image versions" UI block. Clean them up alongside the parent image, or use whole-package delete which sweeps everything.
+
 ## Adding a new go-face dlib lineage
 
 **Trigger**: an issue opened by `.github/workflows/discover-go-face-lineages.yml` (runs weekly on Monday 06:00 UTC, plus `workflow_dispatch`). The workflow scans upstream GHCR for `ghcr.io/andriykalashnykov/go-face/dlib<N>` packages, diffs the result against the lineages already pinned in `ci.yml`, and opens one discovery issue per newly-published lineage with its latest semver tag and immutable digest pre-filled.
