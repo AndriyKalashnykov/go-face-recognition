@@ -5,30 +5,115 @@
 
 # Go Face Recognition
 
-Facial recognition system built in Go, based on FaceNet principles. Uses the [go-face](https://github.com/AndriyKalashnykov/go-face) library (backed by [dlib](http://dlib.net/) C++) for face detection and recognition. Dockerized for multi-architecture deployment (amd64, arm64, arm/v7).
+A **hardened, multi-architecture face recognition CLI** in Go, built on [dlib](http://dlib.net/)'s [FaceNet](https://arxiv.org/abs/1503.03832) implementation via CGo. It's the canonical **end-to-end worked example** of a three-repo build chain that also maintains [`dlib-docker`](https://github.com/AndriyKalashnykov/dlib-docker) and [`go-face`](https://github.com/AndriyKalashnykov/go-face) — every layer is digest-pinned, cosign-signed, and CI-verified across `linux/amd64 + linux/arm64 + linux/arm/v7` before publish.
 
-| Component         | Technology                                       |
-|-------------------|--------------------------------------------------|
-| Language          | Go 1.26.2 (CGO enabled)                          |
-| Face Recognition  | go-face (fork of Kagami/go-face, dlib C++)       |
-| Image Processing  | golang.org/x/image (font/opentype for TTF)       |
-| Container         | Docker multi-arch buildx (amd64, arm64, arm/v7); built against upstream `go-face/dlib19` + `go-face/dlib20` builder matrix |
-| Registry          | GHCR (ghcr.io/andriykalashnykov/go-face-recognition) |
-| Image signing     | cosign keyless OIDC (Sigstore Fulcio → Rekor, tag-only) |
-| CI                | GitHub Actions                                   |
-| Linting           | golangci-lint (gosec, gocritic, errorlint, …), hadolint, actionlint |
-| Security scanning | gitleaks (secrets), Trivy (fs + image), govulncheck (Go CVEs) |
-| Dependency updates| Renovate (+ scheduled upstream lineage discovery) |
+**What it does.** Loads a directory of labeled training images (`persons/Alice/*.jpg`, `persons/Bob/*.jpg`), initializes a dlib ResNet recognizer + shape-predictor + MMOD face-detector from `models/*.dat`, then detects and classifies faces in `images/unknown.jpg`, annotates the input with each recognized name, and writes `images/result.jpg`. The repo ships with working baked-in test data and models so `./main` Just Works out of the box — see [`cmd/main.go`](cmd/main.go) for the ~80 lines that wire it together, and [Usage](#usage) below for how to plug in your own data.
+
+**Two ways to consume this project:**
+
+1. **Run a pre-built binary from a GitHub Release** (easiest, no Docker required). Every tagged release publishes **six statically-linked binary tarballs** — one per `(dlib lineage × target architecture)` combination, with a cosign-signed `checksums.txt` so verification needs no pre-shared key. Extract, run `./main`, done. Jump to [Release artifacts (pre-built binaries)](#release-artifacts-pre-built-binaries).
+2. **Pull a pre-built multi-arch container image from GHCR.** Every tagged release publishes signed multi-arch images at `ghcr.io/andriykalashnykov/go-face-recognition:<tag>` (primary `dlib20` lineage) and `:<tag>-dlib19` (secondary `dlib19` lineage). Jump to [Verifying a published image signature](#verifying-a-published-image-signature) for the cosign verification snippet.
+
+The [Quick Start](#quick-start) section below covers both consumption paths plus the developer path (clone + `make build`) in three short snippets.
+
+**Position in the image-build chain.** This repo is the top layer of a three-repo chain maintained by the same author:
+
+```
+ghcr.io/andriykalashnykov/dlib-docker:<dlib-version>
+  ↓  (digest-pinned FROM)
+ghcr.io/andriykalashnykov/go-face/dlib<major>:<go-face-version>
+  ↓  (digest-pinned FROM, per CI matrix cell)
+ghcr.io/andriykalashnykov/go-face-recognition:<app-version>         ← this repo
+```
+
+[`dlib-docker`](https://github.com/AndriyKalashnykov/dlib-docker) provides an Ubuntu base image with dlib compiled from source, including a PIC-safe static archive (`libdlib.a`) that the binary in this repo links against. [`go-face`](https://github.com/AndriyKalashnykov/go-face) adds the Go toolchain and CGo bindings on top, publishing one image per active dlib major lineage. This repo (`go-face-recognition`) is the actual application — see [Architecture](#architecture) for the full block diagram of the chain, what each layer provides, and which bug classes live at which layer.
+
+## What this project adds on top of "just a dlib CGo demo"
+
+- **Multi-architecture CI matrix** across every supported upstream `go-face` dlib major lineage (currently `dlib19` + `dlib20`) × every supported platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`). Six build cells per tag push, all running in parallel with independent GHA cache scopes.
+- **Hardened image publishing pipeline** — five pre-push gates per matrix cell (build, Trivy image scan, smoke test, multi-arch build, cosign keyless OIDC sign) with `fail-fast: false` so one broken lineage doesn't block the others. See [Pre-push image hardening](#pre-push-image-hardening).
+- **Dual distribution channel** — signed multi-arch container images on GHCR **and** statically-linked binary tarballs on GitHub Releases. Both distribution formats are cosign-signed with the same keyless OIDC chain of trust, so consumers can verify provenance without any pre-shared key.
+- **Deterministic reproducible release tarballs** built with `tar --sort=name --mtime=@0 --owner=0 --group=0 | gzip -n`, so downstream consumers can re-extract from the published image digest and verify `sha256` matches byte-for-byte. Useful for packagers, distro maintainers, and anyone who wants to prove the binary they're running came from the exact image they audited.
+- **Full local test scaffold** — unit tests (host-runnable, 91.9% statement coverage on the pure-Go `internal/entity` package), integration tests (`//go:build integration`, real dlib classify/recognize pipeline against baked-in models), end-to-end smoke, and **`make image-verify`** that mirrors the CI docker job's per-lineage gates locally before pushing. The structural pre-push gate that closes the "I ran `make -n image-build` and called it verified" failure mode documented in [`CLAUDE.md`](CLAUDE.md).
+- **Scheduled upstream lineage discovery** via [`.github/workflows/discover-go-face-lineages.yml`](.github/workflows/discover-go-face-lineages.yml) — weekly scan of upstream `ghcr.io/andriykalashnykov/go-face/dlib*` with automatic discovery-issue creation (no auto-PR, no auto-merge — chain of trust preserved for the maintainer to review) when a new dlib major lineage appears upstream.
+- **Four first-class Dockerfiles** covering different build strategies: primary production (`Dockerfile.go-face`, used by CI), self-contained Ubuntu builder (`Dockerfile.ubuntu.builder`), minimal alpine runtime (`Dockerfile.alpine.runtime`), and skip-go-face alternative (`Dockerfile.dlib-docker-go`). All four are hadolint-clean, use pinned base image digests with `--no-install-recommends` + apt cleanup, ship SHA256 verification on Go tarball downloads, and have been end-to-end verified on amd64 + arm64 + arm/v7. See [Dockerfiles](#dockerfiles).
+
+## Summary table
+
+| Component | Technology |
+|-----------|------------|
+| Language | Go 1.26.2 (CGO enabled, version derived from `go.mod`, kept fresh by Renovate) |
+| Face recognition engine | [dlib](http://dlib.net/) ResNet via [`AndriyKalashnykov/go-face`](https://github.com/AndriyKalashnykov/go-face) CGo bindings |
+| Image annotation | `golang.org/x/image` (OpenType font rendering, RGBA drawing) |
+| Base builder image | `ghcr.io/andriykalashnykov/go-face/dlib{19,20}:<tag>@<digest>` — one per active dlib major lineage, pinned in `.github/workflows/ci.yml` matrix |
+| Binary link model | **Fully static** — `-extldflags -static` + `static_build` tag, linking `libdlib.a` from the dlib-docker layer. No runtime `.so` dependency on dlib. |
+| Published container images | `ghcr.io/andriykalashnykov/go-face-recognition:<tag>` (dlib20 primary) + `:<tag>-dlib19` (secondary), multi-arch (`linux/amd64` + `linux/arm64` + `linux/arm/v7`) |
+| Published release artifacts | Six binary tarballs per tag (2 lineages × 3 archs) + signed `checksums.txt.sigstore.json`, all attached to the GitHub Release |
+| Image signing | [Cosign](https://docs.sigstore.dev/cosign/overview/) keyless OIDC (Sigstore Fulcio → Rekor, tag-pushes only) — both images and release tarball checksums |
+| Runtime image user | Non-root UID `10001` in a non-root `app` group (K8s restricted-pod-security compatible) |
+| CI / CD | GitHub Actions — matrix `docker` + `release-artifacts-extract` + `release-artifacts-publish` jobs, all `needs:`-chained on tag push |
+| Static analysis | golangci-lint (gosec, gocritic, errorlint, bodyclose, noctx, misspell, goconst), hadolint, actionlint, shellcheck |
+| Security scanning | gitleaks (secrets), Trivy (filesystem + image), govulncheck (Go CVEs, Docker CI only) |
+| Testing | `go test` (unit, host), `go test -tags integration` (real dlib pipeline, inside builder), `make e2e` (binary smoke), `make image-verify` (per-lineage CI equivalent) |
+| Dependency updates | Renovate (branch automerge, squash) + scheduled upstream lineage discovery workflow |
 
 ## Quick Start
 
+Three ways to get this running, from least-setup-required to most:
+
+### 1. Download a pre-built binary (no Docker, no Go toolchain)
+
+Requires just `curl`, `tar`, `sha256sum`, and [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) if you want to verify provenance. Pick the matching `(version, architecture)` combo from the [latest release](https://github.com/AndriyKalashnykov/go-face-recognition/releases/latest):
+
 ```bash
-make deps          # verify required tools
-make build         # build Go binary for Linux amd64
-make test          # run tests with coverage
-make image-build   # build multi-arch Docker images
-make image-run     # run Docker images interactively
+VERSION=1.2.3             # pick from the latest release page
+ARCH=linux_arm64          # linux_amd64 | linux_arm64 | linux_armv7
+URL=https://github.com/AndriyKalashnykov/go-face-recognition/releases/download/v${VERSION}
+
+curl -fsSLO "${URL}/go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+curl -fsSLO "${URL}/checksums.txt"
+curl -fsSLO "${URL}/checksums.txt.sigstore.json"
+
+# (Optional but recommended) verify the Sigstore signature of checksums.txt
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
+  --certificate-oidc-issuer    https://token.actions.githubusercontent.com \
+  checksums.txt
+
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf "go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+cd "go-face-recognition-${VERSION}" && ./main
 ```
+
+Expected output:
+
+```
+Found 1 faces
+Person: Trump
+Total time: 910ms
+```
+
+Each tarball is fully self-contained — it includes the statically-linked binary, dlib model weights, fonts, training images, and a sample input. See [Release artifacts (pre-built binaries)](#release-artifacts-pre-built-binaries) for the full detail on what ships and how verification works.
+
+### 2. Pull a multi-arch container image
+
+```bash
+docker run --rm ghcr.io/andriykalashnykov/go-face-recognition:latest /app/main
+```
+
+Docker picks the right per-platform manifest (`amd64` / `arm64` / `arm/v7`) automatically. To pin against the legacy `dlib19` lineage instead of the default `dlib20`, append `-dlib19` to the tag: `ghcr.io/andriykalashnykov/go-face-recognition:latest-dlib19`. Every published `tag@digest` is cosign-signed — see [Verifying a published image signature](#verifying-a-published-image-signature).
+
+### 3. Develop on this repo
+
+```bash
+make deps          # verify required tools (lazily installs most of them)
+make test          # run host unit tests (pure Go, 91.9% coverage on internal/entity)
+make test-docker   # run the full internal/... unit-test suite inside the builder image (CGO+dlib)
+make e2e           # build Dockerfile.go-face and smoke-test the binary locally
+make image-verify  # build + smoke against every CI matrix lineage pin (pre-push gate)
+```
+
+See [Available Make Targets](#available-make-targets) below for the full list.
 
 ## Prerequisites
 
