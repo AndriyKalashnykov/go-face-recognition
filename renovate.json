@@ -71,6 +71,16 @@
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track per-lineage builder image pins in Makefile (BUILDER_DLIB19/DLIB20 :=) that back `make image-verify` — must stay in lockstep with the ci.yml docker matrix",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "BUILDER_DLIB\\d+\\s*:=\\s*(?<depName>ghcr\\.io/andriykalashnykov/go-face/dlib\\d+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
     }
   ],
   "packageRules": [
