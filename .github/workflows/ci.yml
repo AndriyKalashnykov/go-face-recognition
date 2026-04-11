@@ -230,3 +230,278 @@ jobs:
             echo "→ cosign sign ${tag}@${DIGEST}"
             cosign sign --yes "${tag}@${DIGEST}"
           done <<< "${TAGS}"
+
+  # ==================================================================
+  # release-artifacts-extract — tag-gated
+  #
+  # Extracts the compiled /app/main binary and its required baked-in
+  # data directories (fonts/, models/, persons/, images/) from every
+  # per-platform manifest of every published matrix lineage image, and
+  # packages them as deterministic reproducible tarballs:
+  #
+  #   go-face-recognition_<version>_linux_amd64[-dlib19].tar.gz
+  #   go-face-recognition_<version>_linux_arm64[-dlib19].tar.gz
+  #   go-face-recognition_<version>_linux_armv7[-dlib19].tar.gz
+  #
+  # Six tarballs total per tag (2 lineages × 3 platforms). Each
+  # tarball is self-contained — it includes the binary, all data
+  # files needed to run the example pipeline, LICENSE, and a short
+  # USAGE note. Users extract + `./main` to classify faces in the
+  # baked-in images/unknown.jpg without needing Docker.
+  #
+  # Per-lineage matrix: one cell per dlib major. QEMU binfmt handlers
+  # are installed so `docker create --platform linux/<arch>` can pull
+  # + stage arm64 and arm/v7 manifests on an amd64 runner.
+  #
+  # Tarballs are uploaded as ephemeral workflow artifacts and
+  # downloaded by the release-artifacts-publish job for aggregation +
+  # checksum + cosign signing.
+  # ==================================================================
+  release-artifacts-extract:
+    needs: [docker]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read    # checkout for LICENSE
+      packages: read    # pull from GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dlib_major: '20'
+            suffix: ''
+          - dlib_major: '19'
+            suffix: '-dlib19'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Convert owner to lower case
+        shell: bash
+        env:
+          OWNER: '${{ github.repository_owner }}'
+        run: |
+          echo "OWNER_LC=$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')" >>"${GITHUB_ENV}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+
+      - name: Log in to GHCR (pull)
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract per-platform tarballs
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+
+          # Strip leading 'v' from vX.Y.Z → X.Y.Z (matches the
+          # metadata-action {{version}} pattern used by the docker job).
+          VERSION="${REF_NAME#v}"
+          IMAGE="ghcr.io/${OWNER_LC}/go-face-recognition:${VERSION}${SUFFIX}"
+
+          echo "=== source image: ${IMAGE} ==="
+          docker buildx imagetools inspect "${IMAGE}" >/dev/null
+
+          mkdir -p artifacts
+
+          # (docker platform, asset-name arch suffix)
+          PLATFORMS=(
+            "linux/amd64 amd64"
+            "linux/arm64 arm64"
+            "linux/arm/v7 armv7"
+          )
+
+          for entry in "${PLATFORMS[@]}"; do
+            read -r DOCKER_PLATFORM ASSET_ARCH <<< "${entry}"
+            echo
+            echo "=== extracting ${DOCKER_PLATFORM} ==="
+
+            docker pull --platform "${DOCKER_PLATFORM}" --quiet "${IMAGE}"
+
+            CID=$(docker create --platform "${DOCKER_PLATFORM}" "${IMAGE}")
+            trap 'docker rm -f "${CID}" >/dev/null 2>&1 || true' EXIT
+
+            STAGE="go-face-recognition-${VERSION}${SUFFIX}"
+            rm -rf "${STAGE}"
+            mkdir -p "${STAGE}"
+
+            # Core binary + baked-in test data.
+            docker cp "${CID}:/app/main"    "${STAGE}/main"
+            docker cp "${CID}:/app/fonts"   "${STAGE}/fonts"
+            docker cp "${CID}:/app/models"  "${STAGE}/models"
+            docker cp "${CID}:/app/persons" "${STAGE}/persons"
+            docker cp "${CID}:/app/images"  "${STAGE}/images"
+
+            docker rm -f "${CID}" >/dev/null
+            trap - EXIT
+
+            # Repo-provided artifacts (at this tag commit).
+            cp LICENSE "${STAGE}/"
+            cp README.md "${STAGE}/"
+
+            # Short usage note so curl-and-tar users have instant
+            # onboarding without grep'ing README.
+            cat > "${STAGE}/USAGE.md" <<USAGE
+          # go-face-recognition ${VERSION}${SUFFIX} (${DOCKER_PLATFORM})
+
+          This tarball contains a statically-linked go-face-recognition
+          binary plus all data files required to run the example
+          classification pipeline out of the box. No Docker, no CGo
+          toolchain, no dlib system package needed on the host — the
+          binary is linked against a \`libdlib.a\` static archive from
+          upstream \`ghcr.io/andriykalashnykov/dlib-docker\`.
+
+          Run the baked-in example:
+
+              ./main
+
+          It will load every subdirectory of \`persons/\` as a labeled
+          identity, detect + classify faces in \`images/unknown.jpg\`,
+          and write an annotated \`images/result.jpg\`.
+
+          To run against your own data, replace the contents of
+          \`persons/\` and \`images/unknown.jpg\` before invoking
+          \`./main\`. The \`models/\` directory holds the pre-trained
+          dlib ResNet + shape-predictor weights and should not be
+          modified.
+
+          See https://github.com/AndriyKalashnykov/go-face-recognition
+          for full documentation.
+          USAGE
+
+            # Deterministic, reproducible tarball:
+            #   --sort=name      stable file ordering
+            #   --owner=0 --group=0 --numeric-owner  zeroed ownership
+            #   --mtime=@0       zero mtimes (Unix epoch)
+            #   gzip -n          strip gzip header timestamp + filename
+            #
+            # This lets downstream consumers re-extract from the image
+            # digest and verify sha256 matches checksums.txt byte-for-byte.
+            TARBALL="artifacts/go-face-recognition_${VERSION}_linux_${ASSET_ARCH}${SUFFIX}.tar.gz"
+            tar --sort=name \
+                --owner=0 --group=0 --numeric-owner \
+                --mtime='@0' \
+                -C "$(dirname "${STAGE}")" \
+                -cf - "$(basename "${STAGE}")" \
+              | gzip -n > "${TARBALL}"
+
+            rm -rf "${STAGE}"
+            echo "built ${TARBALL} ($(stat -c '%s' "${TARBALL}") bytes)"
+          done
+
+          echo
+          echo "=== tarballs for lineage dlib${{ matrix.dlib_major }} ==="
+          find artifacts -maxdepth 1 -type f -printf '%s\t%p\n'
+
+      - name: Upload lineage tarballs
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: release-tarballs-dlib${{ matrix.dlib_major }}
+          path: artifacts/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ==================================================================
+  # release-artifacts-publish — tag-gated
+  #
+  # Downloads every tarball from every lineage of release-artifacts-
+  # extract, produces a single checksums.txt covering all 6 tarballs,
+  # cosign-blob-signs the checksums file with GitHub OIDC keyless
+  # signing (same chain of trust as the image signing above), creates
+  # a GitHub Release if one does not already exist for this tag, and
+  # uploads everything.
+  #
+  # Users verify with:
+  #   curl -LO .../checksums.txt.pem .../checksums.txt.sig .../checksums.txt
+  #   cosign verify-blob \
+  #     --certificate checksums.txt.pem \
+  #     --signature   checksums.txt.sig \
+  #     --certificate-identity-regexp 'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
+  #     --certificate-oidc-issuer    https://token.actions.githubusercontent.com \
+  #     checksums.txt
+  #   sha256sum -c checksums.txt --ignore-missing
+  # ==================================================================
+  release-artifacts-publish:
+    needs: [release-artifacts-extract]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # gh release create + upload
+      id-token: write   # cosign keyless OIDC
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Download all lineage tarballs
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: release-tarballs-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate checksums.txt
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          # LC_ALL=C sort keeps the ordering stable across locales.
+          sha256sum -- ./*.tar.gz | LC_ALL=C sort > checksums.txt
+          # Strip the leading ./ from filenames so the checksum file
+          # matches the plain names users get after `curl -LO`.
+          sed -i 's| \./| |' checksums.txt
+          echo
+          cat checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign checksums with cosign (keyless OIDC)
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem \
+            checksums.txt
+          echo
+          echo "=== signed release bundle ==="
+          ls -la
+
+      - name: Create GitHub Release (if not already present)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          if gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists — will upload assets to it"
+          else
+            echo "Creating release ${TAG}"
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --verify-tag \
+              --generate-notes \
+              --title "${TAG}"
+          fi
+
+      - name: Upload release assets
+        working-directory: artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          gh release upload "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --clobber \
+            -- \
+            *.tar.gz checksums.txt checksums.txt.sig checksums.txt.pem
+          echo
+          echo "=== release assets uploaded to ${TAG} ==="
+          gh release view "${TAG}" --repo "${{ github.repository }}" \
+            --json assets --jq '.assets[] | "\(.name) (\(.size) bytes)"'

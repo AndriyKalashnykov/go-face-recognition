@@ -329,6 +329,7 @@ GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 | Workflow | Triggers | Summary |
 |----------|----------|---------|
 | **ci** (`docker` job) | push, PR, tags | `strategy.matrix` over every supported upstream `go-face` dlib major lineage (currently `dlib19` + `dlib20`). Each matrix cell runs the full five-gate hardening pipeline (build + Trivy image scan + smoke test + multi-arch build + cosign signing) independently with its own GHA cache scope. Publishes multi-arch image (amd64, arm64, arm/v7) to GHCR on tag pushes only. |
+| **ci** (`release-artifacts-extract` + `release-artifacts-publish` jobs) | tag pushes only | `needs: [docker]`. Extracts `/app/main` + `fonts/` + `models/` + `persons/` + `images/` from every per-platform manifest of every lineage image, packages each as a deterministic reproducible tarball (`tar --sort=name --mtime=@0 --owner=0 --group=0 \| gzip -n`), produces `checksums.txt` covering all six tarballs, cosign-blob-signs it with keyless OIDC (same chain of trust as the image signing), creates the GitHub Release if missing, and uploads everything. See "Release artifacts" below. |
 | **cleanup-runs** | weekly (Sunday 00:00 UTC), `workflow_dispatch` | Remove old workflow runs via native `gh` CLI |
 | **discover-go-face-lineages** | weekly (Monday 06:00 UTC), `workflow_dispatch` | Scan upstream `ghcr.io/andriykalashnykov/go-face/dlib*` via the anonymous Docker Registry v2 token flow, diff against the lineages currently pinned in `ci.yml`, and open one idempotent discovery issue per new lineage with the latest semver tag + immutable manifest digest pre-filled. Cites the "Adding a new go-face dlib lineage" playbook in [`CLAUDE.md`](CLAUDE.md). No auto-PR or auto-merge — chain of trust preserved. |
 
@@ -361,6 +362,88 @@ cosign verify ghcr.io/andriykalashnykov/go-face-recognition:<tag> \
 ```
 
 Expected output: a JSON certificate chain ending in `"issuer": "https://token.actions.githubusercontent.com"` with `"Subject"` pointing at the `AndriyKalashnykov/go-face-recognition` workflow. Any tampering with the image after publish invalidates the signature.
+
+### Release artifacts (pre-built binaries)
+
+Every tagged release also publishes **pre-built binary tarballs** to the
+[GitHub Releases](https://github.com/AndriyKalashnykov/go-face-recognition/releases)
+page alongside the container images. This is for users who want to run
+`go-face-recognition` directly on a host (e.g. a Raspberry Pi) without
+installing Docker, and for packagers who want a reproducible artifact to
+redistribute.
+
+**What's in a release.** Six tarballs per tag — one per `(dlib lineage ×
+target architecture)` combination — plus a signed checksum file:
+
+```
+go-face-recognition_<version>_linux_amd64.tar.gz            # dlib20 primary
+go-face-recognition_<version>_linux_arm64.tar.gz            # dlib20 primary
+go-face-recognition_<version>_linux_armv7.tar.gz            # dlib20 primary
+go-face-recognition_<version>_linux_amd64-dlib19.tar.gz     # dlib19 secondary
+go-face-recognition_<version>_linux_arm64-dlib19.tar.gz     # dlib19 secondary
+go-face-recognition_<version>_linux_armv7-dlib19.tar.gz     # dlib19 secondary
+checksums.txt                                               # sha256 of every tarball
+checksums.txt.sig                                           # cosign signature
+checksums.txt.pem                                           # signing certificate
+```
+
+Each tarball is **fully self-contained** — it includes the
+statically-linked binary, the dlib model files (`models/`), the fonts, the
+training images (`persons/`), and a sample input (`images/unknown.jpg`).
+No runtime system packages are required: the binary is linked against
+`libdlib.a` from upstream
+[`ghcr.io/andriykalashnykov/dlib-docker`](https://github.com/AndriyKalashnykov/dlib-docker)
+so it has no `.so` dependency on dlib at all. The tarballs themselves are
+built with deterministic metadata (`tar --sort=name --mtime=@0
+--owner=0 --group=0 --numeric-owner | gzip -n`) so downstream consumers
+can re-extract from the published image digest and verify the sha256
+matches byte-for-byte.
+
+**Download + verify + run** — picks the right binary for your
+architecture, verifies the Sigstore signature without any pre-shared key,
+and runs the classification example out of the box:
+
+```bash
+# Pick the version + arch you need
+VERSION=1.2.3
+ARCH=linux_arm64
+URL=https://github.com/AndriyKalashnykov/go-face-recognition/releases/download/v${VERSION}
+
+# Fetch the tarball and the full signed checksum bundle
+curl -fsSLO "${URL}/go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+curl -fsSLO "${URL}/checksums.txt"
+curl -fsSLO "${URL}/checksums.txt.sig"
+curl -fsSLO "${URL}/checksums.txt.pem"
+
+# Verify the checksum file was signed by this repo's GitHub Actions workflow
+cosign verify-blob \
+  --certificate       checksums.txt.pem \
+  --signature         checksums.txt.sig \
+  --certificate-identity-regexp 'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
+  --certificate-oidc-issuer    https://token.actions.githubusercontent.com \
+  checksums.txt
+
+# Verify the tarball matches the (now trusted) checksum
+sha256sum -c checksums.txt --ignore-missing
+
+# Unpack and run
+tar -xzf "go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+cd "go-face-recognition-${VERSION}"
+./main
+```
+
+Expected output:
+
+```
+Found 1 faces
+Person: Trump
+Total time: 910ms
+```
+
+To run against your own data, replace the contents of `persons/` and
+`images/unknown.jpg` before invoking `./main`. The `models/` directory
+holds the pre-trained dlib ResNet + shape-predictor weights and should
+not be modified.
 
 [Renovate](https://docs.renovatebot.com/) keeps dependencies up to date with platform automerge enabled.
 
