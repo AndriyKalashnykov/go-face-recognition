@@ -464,7 +464,18 @@ jobs:
         working-directory: artifacts
         run: |
           set -euo pipefail
+          # cosign v3.x defaults to --new-bundle-format which emits a
+          # single `*.sigstore.json` instead of separate .sig + .pem
+          # files, and silently ignores --output-signature /
+          # --output-certificate. Force the legacy dual-file output so
+          # downstream consumers verifying with the older
+          #
+          #   cosign verify-blob --certificate ... --signature ... file
+          #
+          # flow (documented in README) still work without pulling a
+          # bundle-format-aware cosign.
           cosign sign-blob --yes \
+            --new-bundle-format=false \
             --output-signature checksums.txt.sig \
             --output-certificate checksums.txt.pem \
             checksums.txt
