@@ -191,8 +191,8 @@ e2e: deps
 # as GitHub Actions. When a lineage is added or bumped upstream, update both
 # this block AND the ci.yml matrix in the same PR (Renovate's
 # "go-face builder images" group rule collapses the bumps into one PR).
-BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:349946e5ff74011a27f010d6250800b3c1506acfb3a452e941f2cdb2cbd7d750
-BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2@sha256:694ce629ba44265cc0d378a1137bce57cba94b9e5ca27cd7c1be5a5f5fc61872
+BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:57141e2e52ed280b90bae775c6945b2d4a2afa9dc1806be1f2633c46fd6d9b02
+BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2@sha256:d54649b6d2686cf2498cbe0abba3bc1d970ca44285cf3e13ca9b169fb867b962
 
 #image-verify: @ Build + smoke-test Dockerfile.go-face against every CI matrix lineage
 # This is the local equivalent of the docker job's GATE 1 (build-for-scan) +
