@@ -161,6 +161,22 @@ If you ever need to clean up a stale / test / broken `go-face-recognition` packa
 
 5. **Deleting a git tag that has a GitHub Release demotes the release to DRAFT, not to deleted.** GitHub's behavior on `git push origin --delete <tag>`: the tag is removed, but any Release that pointed at it becomes a persistent draft without a tag reference. Recreating the tag does NOT re-attach the draft — you end up with a phantom draft release that still shows up in `gh release list` and in `gh release view`, but is invisible to `shields.io/github/v/release/...` badges and to anonymous consumers of the Releases page. This hit dlib-docker during the libdlib.a tag re-cut on 2026-04-11 and left its release badge reading "no releases or repo not found" until the drafts were promoted via `gh release edit <tag> --draft=false`. The `release-artifacts-publish` job's release-creation step explicitly handles this case: instead of the naive `if gh release view ... else create` pattern, it inspects `.isDraft` and promotes drafts explicitly. Same fix lives in `dlib-docker/.github/workflows/ci.yml`'s `Create or publish GitHub Release` step.
 
+6. **First-publish race on a freshly-created (or freshly-deleted-and-recreated) GHCR package.** When the `docker` job's matrix publishes to a package namespace that does not currently exist in GHCR, the first matrix cell to finish its multi-arch push **creates** the package and triggers GitHub's internal package-to-repo linkage. Any sibling cell that finishes its push within a few seconds of the first cell's completion hits
+   ```
+   denied: permission_denied: write_package
+   ```
+   because the package-to-repo linkage has not yet propagated through GitHub's auth layer. Observed on 2026-04-11 during the v0.0.1 release push: `docker (19)` finished first at `20:04:12Z` (creating the package), `docker (20)` tried to push its manifest at `20:04:15Z` (3 seconds later) and was denied. The race is **once-per-namespace** — subsequent pushes from any matrix cell work fine once the package exists + is linked. Fix when it happens:
+   ```bash
+   gh run rerun <run-id> --failed
+   ```
+   This retries only the failed cell. By the time the rerun hits the push step, the namespace + linkage are already in place from the first cell's earlier successful push, so the second attempt succeeds cleanly. Downstream `release-artifacts-extract` + `release-artifacts-publish` jobs re-evaluate their `needs:` chains automatically once the failed cell turns green.
+
+   **When does this bite?** Only the very first publish to a namespace that:
+   - has never been published to before (brand-new repo), OR
+   - was fully deleted via `DELETE /user/packages/container/<name>` (the whole-package escape hatch from gotcha #2 above).
+
+   **Do not** attempt a fix by serializing the matrix (`needs: [docker (20)]`-style dependency chain) — it costs parallelism on every release to work around a once-per-deletion event, and a `gh run rerun --failed` one-liner is cheaper. Document-and-accept rather than pre-serialize.
+
 ## Adding a new go-face dlib lineage
 
 **Trigger**: an issue opened by `.github/workflows/discover-go-face-lineages.yml` (runs weekly on Monday 06:00 UTC, plus `workflow_dispatch`). The workflow scans upstream GHCR for `ghcr.io/andriykalashnykov/go-face/dlib<N>` packages, diffs the result against the lineages already pinned in `ci.yml`, and opens one discovery issue per newly-published lineage with its latest semver tag and immutable digest pre-filled.
