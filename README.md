@@ -254,6 +254,43 @@ with `make image-verify` or `make e2e`, then commit. Renovate's
 `go-face builder images` group rule collapses all the lineage bumps across
 this chain into a single PR so the pin drift stays auditable.
 
+### Dockerfiles
+
+This repo ships four Dockerfiles, each targeting a different build strategy.
+`Dockerfile.go-face` is the canonical production path used by the CI publish
+matrix; the other three are **alternative build paths** kept as first-class
+maintained artifacts for scenarios where the primary path isn't what you
+want. All four produce the same functional end-state — a statically-linked
+binary that classifies faces in `images/unknown.jpg` against `persons/`.
+
+| Dockerfile | Purpose | Base image (starts from) | libdlib source | Used by |
+|------------|---------|--------------------------|----------------|---------|
+| **`Dockerfile.go-face`** | **Primary** production build. The CI matrix publishes multi-arch GHCR images from this file, one per dlib lineage. Hardened for K8s restricted-pod-security (non-root UID 10001). | `ghcr.io/andriykalashnykov/go-face/dlib{19,20}:<tag>@<digest>` — upstream go-face image (dlib-docker + Go + go-face CGo source tree) | Inherited from upstream `go-face` (→ dlib-docker → from-source dlib build) | `.github/workflows/ci.yml` docker matrix, `make image-build`, `make e2e`, `make image-verify` |
+| **`Dockerfile.ubuntu.builder`** | **Self-contained alternative builder.** Installs dlib via Ubuntu's stock `libdlib-dev` apt package and builds Go from go.dev with SHA256 verification. Useful when you want to reproduce a build without depending on the upstream `dlib-docker`/`go-face` image chain at all. Produces a dev sandbox container (`tail -f /dev/null`) with the baked-in binary for interactive debugging. | `ubuntu:noble-20260324@<digest>` (pinned) | Ubuntu apt `libdlib-dev` package (currently dlib 19.24.0 on noble — older than the dlib-docker chain's 20.0.1 but self-consistent) | `make image-build` → `:latest-builder` |
+| **`Dockerfile.alpine.runtime`** | **Minimal alpine runtime slice** over a locally-built builder image. Copies the compiled binary + test data out of the `BUILDER_IMAGE` (default: `:latest-builder` from `Dockerfile.ubuntu.builder`) into a fresh `alpine:3.23.3` stage running as non-root UID 10001. Use this to produce a small (~130 MB content size) deployable runtime image after running `Dockerfile.ubuntu.builder`. | `alpine:3.23.3@<digest>` (pinned) + `BUILDER_IMAGE` via `COPY --from` | Inherited from `BUILDER_IMAGE` | `make image-build` → `:latest-runtime` |
+| **`Dockerfile.dlib-docker-go`** | **Skip-go-face alternative.** Builds directly on `dlib-docker` (one layer shallower than `Dockerfile.go-face`), installing Go at build time. Useful for reproducible builds that only depend on one upstream repo, or when exercising dlib-docker changes without round-tripping through the go-face image. Produces the same non-root alpine runtime as `Dockerfile.go-face`. | `ghcr.io/andriykalashnykov/dlib-docker:<tag>@<digest>` (pinned) | Inherited from dlib-docker (→ from-source dlib build via cmake) | `make image-build` → `:latest-dlib-docker-go` |
+
+**Quality invariants (enforced by `hadolint` + `trivy-fs` on every commit):**
+all four Dockerfiles use pinned base-image digests, `--no-install-recommends`
+on apt installs with `/var/lib/apt/lists/*` cleanup, SHA256 verification on
+Go tarball downloads, OCI image labels, and a non-root runtime `USER`. All
+four have been end-to-end verified on `linux/amd64` (both the build and
+running the compiled binary against the baked-in test data).
+
+**When to use which:**
+
+- **Production / CI publishes:** always `Dockerfile.go-face` — it's the only
+  one whose CI publishes multi-arch signed images to GHCR.
+- **Local dev sandbox without GHCR dependency:** `Dockerfile.ubuntu.builder`
+  gives you a ubuntu-based container with the binary baked in. No need to
+  pull the upstream `go-face` or `dlib-docker` images.
+- **Small runtime deployable after ubuntu builder:** `Dockerfile.alpine.runtime`
+  over `Dockerfile.ubuntu.builder`. Matches the size profile of the
+  `Dockerfile.go-face` runtime stage.
+- **Testing dlib-docker changes end-to-end:** `Dockerfile.dlib-docker-go`
+  bypasses the go-face intermediate so dlib-docker pin bumps can be
+  exercised in isolation.
+
 ## Building on macOS
 
 Install OpenBLAS etc:

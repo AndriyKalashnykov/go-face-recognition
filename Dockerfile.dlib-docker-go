@@ -1,13 +1,34 @@
-ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/dlib-docker:v20.0.0@sha256:199cece5aca1dc78da78ab22cd075e77b9df4dcd774631830a3bbe5f6f80aa8e"
+# Builds directly on dlib-docker (upstream libdlib-providing image) rather
+# than going through the go-face repo layer. Useful when you want to
+# bypass the intermediate go-face image — e.g. for a reproducible build
+# chain that only touches one upstream repo, or to test dlib-docker changes
+# without a round-trip through go-face.
+#
+# The digest is the rebuilt `dlib-docker:20.0.1` published on 2026-04-11
+# which ships BOTH libdlib.so AND libdlib.a + exports LIBRARY_PATH so the
+# static-link `-extldflags -static` build below can resolve `-ldlib`.
+ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/dlib-docker:20.0.1@sha256:b223dfc86b4a05d625263ff1c82dab4dcfcd2606761273b5c198049fe5e2a4be"
 
 FROM ${BUILDER_IMAGE} AS builder
 
+# dlib-docker's final USER is `appuser` (UID 1000) with an unwritable HOME.
+# Switch to root for the builder stage so `go mod download` and `go build`
+# can create their module + build caches. A later `USER 10001` in the
+# runtime stage resets non-root posture for the published image.
+# hadolint ignore=DL3002
+USER root
+
 ARG GO_VER="1.26.2"
-ARG DEBIAN_FRONTEND=noninteractive
+# Re-declare the buildx-auto-provided TARGETARCH so it is visible to RUN
+# layers below (ARG values from before FROM do not propagate past the
+# stage boundary). Used by the conditional CGO_LDFLAGS block below.
+ARG TARGETARCH
 
-#RUN DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get update && apt-get install -y --install-recommends libgfortran5 libquadmath0-amd64-cross libquadrule-dev
+# Use bash with pipefail so the SHA256 verification pipeline below fails
+# the RUN layer on any intermediate error instead of silently succeeding
+# on the last command's exit status.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Set the working directory
 WORKDIR /app
 
 # Copy go modules files
@@ -24,30 +45,55 @@ COPY ./images/ images/
 COPY ./models/ models/
 COPY ./persons/ persons/
 
-# https://hub.docker.com/_/golang/
-# Install Go
-RUN curl -sLO https://go.dev/dl/go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && tar -C /usr/local -xzf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz \
-    && rm -rf go$GO_VER.linux-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/').tar.gz
+# Install Go with SHA256 verification. dl.google.com serves the .sha256
+# sidecar as plain text (go.dev's .sha256 URL serves HTML instead, so we
+# pin the download target to dl.google.com to keep tarball and checksum
+# behind the same cert chain).
+RUN set -eux; \
+    GO_ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64$/arm64/' -e 's/armv7l$/armv6l/'); \
+    GO_TARBALL="go${GO_VER}.linux-${GO_ARCH}.tar.gz"; \
+    curl -fsSLO "https://dl.google.com/go/${GO_TARBALL}"; \
+    GO_SHA256=$(curl -fsSL "https://dl.google.com/go/${GO_TARBALL}.sha256"); \
+    echo "${GO_SHA256}  ${GO_TARBALL}" | sha256sum -c -; \
+    tar -C /usr/local -xzf "${GO_TARBALL}"; \
+    rm -f "${GO_TARBALL}"
 
-ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig/
+ENV PATH=/usr/local/go/bin:${PATH}
+# dlib-docker installs dlib-1.pc under /usr/local/lib/pkgconfig (NOT
+# /usr/local/lib64/pkgconfig, which was a long-standing typo in this
+# Dockerfile prior to 2026-04-11). pkg-config isn't strictly required here
+# because CGO flags are passed directly via CGO_LDFLAGS below, but the
+# env var is still correct for any Go package that calls out to it.
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
-RUN /usr/local/go/bin/go mod download
+RUN go mod download
 
 RUN <<EOT
+    set -eu
     if [ "${TARGETARCH}" = "amd64" ]; then
       export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lquadmath -lblas -latlas"
     else
       export CGO_LDFLAGS="-lcblas -llapack_atlas -lgfortran -lblas -latlas"
     fi
-
-    CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath -ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
+    CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -extldflags -static" -tags "static netgo cgo static_build" -o cmd/main cmd/main.go
 EOT
 
+# https://hub.docker.com/_/alpine/tags
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS runtime
 
-# Pick up security patches published between alpine image cuts.
-# Non-root numeric UID — required for K8s restricted pod security.
+# Re-declare so the ARG is in scope for LABEL interpolation after FROM.
+ARG BUILDER_IMAGE
+LABEL org.opencontainers.image.title="go-face-recognition (alpine runtime over dlib-docker)" \
+      org.opencontainers.image.description="Minimal alpine runtime slice built on top of upstream dlib-docker directly, skipping the go-face image layer. Statically linked against libdlib.a from dlib-docker. Runs as non-root UID 10001 for K8s restricted pod security." \
+      org.opencontainers.image.source="https://github.com/AndriyKalashnykov/go-face-recognition" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.base.name="docker.io/library/alpine:3.23.3" \
+      io.artifacthub.package.readme-url="https://raw.githubusercontent.com/AndriyKalashnykov/go-face-recognition/main/README.md"
+
+# Pick up security patches published between alpine image cuts (matches the
+# primary runtime stage in Dockerfile.go-face). Non-root numeric UID is
+# required for K8s restricted pod security (runAsNonRoot: true,
+# allowPrivilegeEscalation: false).
 RUN apk --no-cache upgrade && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app app
@@ -63,5 +109,7 @@ COPY --from=builder /app/persons/ persons/
 
 USER 10001
 
-# Keep the container running
+# Keep the container running so `make image-run` / `docker exec` work.
+# Override with `--entrypoint /app/main` to execute the classification
+# pipeline against the baked-in test data.
 CMD ["tail", "-f", "/dev/null"]
