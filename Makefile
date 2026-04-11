@@ -319,7 +319,7 @@ image-build:
 		-t $(IMAGE_REPO):latest-go-face .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.ubuntu.builder \
 		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-builder .
-	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.alpine.runtme.local \
+	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.alpine.runtime \
 		-t $(IMAGE_REPO):latest-runtime .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.dlib-docker-go \
 		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-dlib-docker-go .

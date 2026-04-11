@@ -131,13 +131,14 @@ Last reviewed: 2026-04-11
 - [x] ~~Matrix CI across upstream `go-face/dlib19` and `go-face/dlib20` builder lineages~~ (done 2026-04-11 — `.github/workflows/ci.yml` docker job gained `strategy.matrix.include` with per-lineage builder pin, cache scope, scan/smoke container suffix, and tag suffix; Renovate custom regex manager + `go-face builder images` group track both pins)
 - [x] ~~Bump `GO_VER` 1.26.1 → 1.26.2~~ (done 2026-04-07)
 - [x] ~~Bump Ubuntu noble-20260217 → noble-20260324 in Dockerfile.ubuntu.builder~~ (done 2026-04-07)
-- [x] ~~Pin `Dockerfile.alpine.runtme` base image with digest~~ (already pinned to `alpine:3.23.3@sha256:25109184...`)
-- [x] ~~Add non-root `USER` directive to runtime Dockerfiles~~ (done 2026-04-10 — UID 10001 in `Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtme{,.local}`; DS-0002 now passes without `.trivyignore`)
+- [x] ~~Pin `Dockerfile.alpine.runtime` base image with digest~~ (already pinned to `alpine:3.23.3@sha256:25109184...`)
+- [x] ~~Add non-root `USER` directive to runtime Dockerfiles~~ (done 2026-04-10 — UID 10001 in `Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `Dockerfile.alpine.runtime`; DS-0002 now passes without `.trivyignore`)
 - [x] ~~Add Trivy image scan + smoke test before push (`/harden-image-pipeline` Phase 1)~~ (done 2026-04-10)
 - [x] ~~`/harden-image-pipeline` Phase 2 — cosign keyless OIDC signing~~ (done 2026-04-10 — tag-gated `sigstore/cosign-installer@cad07c2e # v4.1.1` + `cosign sign --yes <tag>@<digest>` loop; docker job gained `id-token: write` permission)
 - [x] ~~`apk upgrade` in runtime stages to pick up CVE patches between alpine image cuts~~ (done 2026-04-10 — closed CVE-2026-28390 openssl + CVE-2026-22184 zlib)
+- [x] ~~Rename typo `Dockerfile.alpine.runtme` → `Dockerfile.alpine.runtime`~~ (done 2026-04-11 — while rebasing the secondary Dockerfile set. Also deleted the unused `Dockerfile.alpine.runtme` (no `.local` suffix) which referenced a deleted `ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-builder` tag and was not used by any `make` target)
+- [x] ~~`Dockerfile.dlib-docker-go` references deleted `dlib-docker:v20.0.0@sha256:199cece5...`~~ (done 2026-04-11 — both tag and digest were gone from GHCR. Repointed at the rebuilt `dlib-docker:20.0.1` digest published in Phase 1 of the libdlib.a fix chain)
 - [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
-- [ ] Rename typo `Dockerfile.alpine.runtme` → `Dockerfile.alpine.runtime`
 
 ## Adding a new go-face dlib lineage
 
