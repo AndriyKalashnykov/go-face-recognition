@@ -128,10 +128,103 @@ clean:
 testdata: deps
 	@git clone https://github.com/Kagami/go-face-testdata testdatas
 
-#test: @ Run tests with coverage
+#test: @ Run unit tests on host (scoped to pure-Go packages that do not need CGO/dlib)
+# The internal/usecases package transitively imports go-face (dlib C bindings),
+# so it cannot be compiled on a host without libjpeg-dev/libdlib-dev/libopenblas-dev
+# headers. `make test` stays scoped to internal/entity (pure Go, always compiles)
+# so host developers get fast feedback without the full C toolchain. For the full
+# suite incl. usecases + integration tests, use `make test-docker` /
+# `make test-integration` which run inside the builder image.
 test: deps
-	@go test -cover -parallel=1 -v -coverprofile=coverage.out ./...
+	@go test -cover -parallel=1 -v -coverprofile=coverage.out ./internal/entity/...
 	@go tool cover -func=coverage.out | sort -rnk3
+
+#test-docker: @ Run the full unit-test suite inside the builder image (CGO+dlib)
+# Uses the Makefile's BUILDER_IMAGE pin so the host does not need a C toolchain.
+# Mounts the repo read-write so coverage.out lands in the host workspace.
+# PATH must include /usr/local/go/bin because `go test` internally exec's
+# `go` (without an absolute path) to build and instrument coverage for
+# main-package targets under ./cmd/...
+test-docker: deps
+	@docker run --rm \
+		-v $(CURDIR):/app \
+		-w /app \
+		--user root \
+		-e GOFLAGS=-mod=mod \
+		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+		$(BUILDER_IMAGE) \
+		go test -cover -parallel=1 -v ./internal/...
+
+#test-integration: @ Run integration tests (real dlib pipeline) inside the builder image
+# Tests tagged with `//go:build integration` exercise classify/recognize against
+# the baked-in models/, persons/, and images/ directories. Only runs inside the
+# builder image because it links against dlib.
+test-integration: deps
+	@docker run --rm \
+		-v $(CURDIR):/app \
+		-w /app \
+		--user root \
+		-e GOFLAGS=-mod=mod \
+		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+		$(BUILDER_IMAGE) \
+		go test -tags integration -v -count=1 ./internal/usecases/...
+
+#e2e: @ Build Dockerfile.go-face and run the compiled binary against baked-in test data
+# Mirrors the CI docker job's GATE 1+GATE 3 (scan build + smoke test) on a
+# single lineage (BUILDER_IMAGE default). Use `make image-verify` to run the
+# same gates against every CI matrix lineage.
+e2e: deps
+	@echo "→ e2e: building go-face-recognition:e2e with BUILDER_IMAGE=$(BUILDER_IMAGE)"
+	@docker build --quiet \
+		-f Dockerfile.go-face \
+		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
+		-t go-face-recognition:e2e . >/dev/null
+	@echo "→ e2e: running the classification pipeline"
+	@docker run --rm --entrypoint /app/main go-face-recognition:e2e | tee /tmp/gfr-e2e.log
+	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e.log \
+		|| { echo "FAIL: e2e did not find any faces in the baked-in unknown.jpg"; exit 1; }
+	@echo "PASS: e2e classification pipeline produced ≥1 face."
+
+# Per-CI-matrix-lineage builder image pins. These MUST mirror the
+# .github/workflows/ci.yml docker job `strategy.matrix.include[].builder`
+# entries exactly so `make image-verify` exercises the same chain of trust
+# as GitHub Actions. When a lineage is added or bumped upstream, update both
+# this block AND the ci.yml matrix in the same PR (Renovate's
+# "go-face builder images" group rule collapses the bumps into one PR).
+BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:349946e5ff74011a27f010d6250800b3c1506acfb3a452e941f2cdb2cbd7d750
+BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2@sha256:694ce629ba44265cc0d378a1137bce57cba94b9e5ca27cd7c1be5a5f5fc61872
+
+#image-verify: @ Build + smoke-test Dockerfile.go-face against every CI matrix lineage
+# This is the local equivalent of the docker job's GATE 1 (build-for-scan) +
+# GATE 3 (smoke test) per matrix cell. If this target passes on your host, the
+# CI docker job for the same lineages WILL NOT regress due to an upstream
+# builder image change, a Dockerfile.go-face change, or a BUILDER_IMAGE bump.
+# Closes the structural gap that allowed d33cc15's libdlib.a regression to ship:
+# `make -n image-build` is a dry run — `make image-verify` does the real build.
+#
+# Run this as part of the pre-push checklist whenever Dockerfile.go-face,
+# ci.yml matrix pins, or any Makefile `BUILDER_*` variable is touched.
+image-verify: deps
+	@set -e; \
+	for spec in \
+		"dlib20:$(BUILDER_DLIB20)" \
+		"dlib19:$(BUILDER_DLIB19)"; \
+	do \
+		lineage=$${spec%%:*}; \
+		builder=$${spec#*:}; \
+		echo "→ image-verify[$$lineage]: building with BUILDER_IMAGE=$$builder"; \
+		docker build --quiet \
+			-f Dockerfile.go-face \
+			--build-arg BUILDER_IMAGE=$$builder \
+			-t go-face-recognition:verify-$$lineage . >/dev/null; \
+		echo "→ image-verify[$$lineage]: running smoke test"; \
+		docker run --rm --entrypoint /app/main go-face-recognition:verify-$$lineage \
+			| tee /tmp/gfr-verify-$$lineage.log; \
+		grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-verify-$$lineage.log \
+			|| { echo "FAIL: $$lineage smoke test did not find any faces"; exit 1; }; \
+		echo "PASS: image-verify[$$lineage]"; \
+	done
+	@echo "PASS: image-verify across all CI matrix lineages."
 
 #build: @ Build Go binary for Linux amd64
 build: deps
@@ -301,7 +394,8 @@ renovate-validate: renovate-bootstrap
 	@npx --yes renovate --platform=local
 
 .PHONY: help deps deps-act deps-hadolint deps-shellcheck deps-actionlint \
-        deps-gitleaks deps-trivy deps-govulncheck clean testdata test build \
+        deps-gitleaks deps-trivy deps-govulncheck clean testdata test \
+        test-docker test-integration e2e image-verify build \
         build-arm64 format lint lint-ci secrets trivy-fs vulncheck static-check \
         run update release image-bootstrap image-build image-run image-prune \
         image-setup-multiarch image-run-ghcr-amd64 image-run-ghcr-arm64 \

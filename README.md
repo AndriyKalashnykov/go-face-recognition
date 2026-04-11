@@ -83,7 +83,11 @@ Run `make help` to see all available targets.
 
 | Target | Description |
 |--------|-------------|
-| `make test` | Run tests with coverage |
+| `make test` | Run host-compatible unit tests (scoped to `internal/entity` — pure Go, no CGO) |
+| `make test-docker` | Run the full `internal/...` unit-test suite inside the builder image (CGO+dlib) |
+| `make test-integration` | Run `//go:build integration` tests inside the builder image — exercises the real dlib classify/recognize pipeline against baked-in `models/`, `persons/`, `images/unknown.jpg` |
+| `make e2e` | Build `Dockerfile.go-face` against the primary `BUILDER_IMAGE` lineage and run the compiled binary; asserts ≥1 face is classified |
+| `make image-verify` | Build + smoke test `Dockerfile.go-face` against **every** CI matrix lineage pin (the local equivalent of the CI docker job's GATE 1 + GATE 3 per cell). **Run this before every push that touches `Dockerfile.go-face`, the `ci.yml` matrix, or any `BUILDER_*` variable** — closes the structural gap where `make -n image-build` (dry run) was used in place of a real build |
 | `make format` | Auto-format Go source code |
 | `make lint` | Run golangci-lint (gosec, gocritic, errorlint, …) and hadolint on all Dockerfiles |
 | `make lint-ci` | Lint GitHub Actions workflows with actionlint |
@@ -169,13 +173,86 @@ Go-Face-Recognition is based on the principles of [FaceNet](https://arxiv.org/ab
 ```
 cmd/             # Application entry point (main.go)
 internal/
-  entity/        # Domain entities (person, drawer)
+  entity/        # Domain entities (person, drawer) — pure Go, no CGO
   usecases/      # Business logic (load, classify, recognize persons)
 images/          # Input/output images for recognition
 persons/         # Person directories with face images for training
 models/          # Trained facial recognition models
 fonts/           # Fonts for image annotation
 ```
+
+## Architecture
+
+This project is the top of a three-repo image-build chain. Each upstream repo
+publishes a container image to GHCR; each downstream repo pulls the layer
+above as an immutable digest-pinned builder base. A bug at any layer
+propagates downwards until it's fixed at the root, so understanding the
+chain is essential before making changes that touch linking, CGo flags,
+or base image versions.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  AndriyKalashnykov/dlib-docker          (this project's grandparent) │
+│  https://github.com/AndriyKalashnykov/dlib-docker                    │
+│                                                                      │
+│  Ubuntu noble + apt{cmake,blas,lapack,jpeg,…} + `davisking/dlib`     │
+│  built from source via `cmake -DBUILD_SHARED_LIBS={ON,OFF}` (two     │
+│  passes, so /usr/local/lib ships BOTH libdlib.so AND libdlib.a       │
+│  for downstream static linking). Exports ENV LIBRARY_PATH=/usr/local │
+│  /lib so downstream `ld -ldlib` resolves the static archive.         │
+│                                                                      │
+│  Publishes:                                                          │
+│    ghcr.io/andriykalashnykov/dlib-docker:19.24.9                     │
+│    ghcr.io/andriykalashnykov/dlib-docker:20.0.1                      │
+└───────────────────────────┬──────────────────────────────────────────┘
+                            │ FROM (digest-pinned)
+                            ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  AndriyKalashnykov/go-face              (this project's parent)      │
+│  https://github.com/AndriyKalashnykov/go-face                        │
+│                                                                      │
+│  dlib-docker + Go toolchain (version extracted from go.mod) + the    │
+│  go-face CGo bindings source tree copied into /app. Matrix-built    │
+│  against every `active` dlib lineage defined in `.dlib-versions.     │
+│  json`; one image per lineage is published with a suffix.            │
+│                                                                      │
+│  Publishes:                                                          │
+│    ghcr.io/andriykalashnykov/go-face/dlib19:0.1.2                    │
+│    ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2                    │
+└───────────────────────────┬──────────────────────────────────────────┘
+                            │ FROM (digest-pinned, per CI matrix cell)
+                            ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  AndriyKalashnykov/go-face-recognition  (this repo)                  │
+│  https://github.com/AndriyKalashnykov/go-face-recognition            │
+│                                                                      │
+│  The actual application: uses go-face to detect + classify faces     │
+│  against baked-in `persons/` and `images/unknown.jpg`, annotates     │
+│  the output via `internal/entity/drawer.go`, and writes              │
+│  `images/result.jpg`. Built as a fully-static binary                 │
+│  (`-extldflags -static` + `static_build` tag) linking against        │
+│  libdlib.a from the layer above, then COPYed into a minimal          │
+│  alpine runtime stage running as non-root UID 10001.                 │
+│                                                                      │
+│  CI matrix builds + publishes against every go-face dlib lineage:    │
+│    ghcr.io/andriykalashnykov/go-face-recognition:<tag>               │
+│    ghcr.io/andriykalashnykov/go-face-recognition:<tag>-dlib19        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**What each layer owns:**
+
+| Layer | Provides | Bug class that lives here |
+|-------|----------|---------------------------|
+| dlib-docker | C++ dlib source build, BLAS/LAPACK/JPEG system libraries, `libdlib.{so,a}` in `/usr/local/lib`, `LIBRARY_PATH` env | Missing static archive, cmake flags, BLAS variant selection, apt package drift |
+| go-face | Go toolchain, go-face CGo source tree, dlib headers + libs inherited from dlib-docker | Go version mismatch, CGo flag regressions, testdata drift |
+| go-face-recognition | Application code, Dockerfile.go-face (static-link build), CI matrix over go-face lineages, cosign signing, image publishing | Linker flag drift, runtime image hardening, classification logic |
+
+**Rebuilding the chain after an upstream change:** bump the digest pin in the
+downstream repo (ci.yml / Makefile / Dockerfile ARG default), verify locally
+with `make image-verify` or `make e2e`, then commit. Renovate's
+`go-face builder images` group rule collapses all the lineage bumps across
+this chain into a single PR so the pin drift stays auditable.
 
 ## Building on macOS
 

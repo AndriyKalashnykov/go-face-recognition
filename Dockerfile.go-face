@@ -2,6 +2,14 @@ ARG BUILDER_IMAGE="ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2@sha256:349946e
 
 FROM ${BUILDER_IMAGE} AS builder
 
+# Upstream go-face/dlib{19,20} builder images ship with a non-root default
+# USER whose HOME=/nonexistent, which makes `go mod download` / `go build`
+# fail with EACCES on the module + build caches. The builder stage produces
+# a static binary that is copied into the non-root alpine runtime stage
+# below, so running as root *here* has no security impact.
+# hadolint ignore=DL3002
+USER root
+
 # Set the working directory
 WORKDIR /app
 

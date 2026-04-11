@@ -34,7 +34,11 @@ make help             # List available targets
 make deps             # Verify required tool dependencies
 make build            # Build Go binary for Linux amd64
 make build-arm64      # Build Go binary for macOS arm64
-make test             # Run tests with coverage
+make test             # Host unit tests (scoped to internal/entity — pure Go, no CGO)
+make test-docker      # Full internal/... unit-test suite inside the builder image (CGO+dlib)
+make test-integration # //go:build integration tests inside the builder image (real dlib pipeline)
+make e2e              # Build Dockerfile.go-face with primary BUILDER_IMAGE + run the binary; asserts ≥1 face
+make image-verify     # Build + smoke test Dockerfile.go-face against EVERY CI matrix lineage (pre-push gate)
 make format           # Auto-format Go source code
 make lint             # golangci-lint (gosec, gocritic, …) + hadolint on all Dockerfile.*
 make lint-ci          # Lint GitHub Actions workflows with actionlint + shellcheck
@@ -51,6 +55,27 @@ make image-run        # Run Docker images interactively
 make release          # Create and push a new semver tag
 make version          # Print current version tag
 ```
+
+### Pre-push checklist for changes touching the image build path
+
+When a PR touches `Dockerfile.go-face`, any `BUILDER_*` Makefile variable, or
+the `ci.yml` docker matrix `include[].builder` pins, the following targets
+MUST pass locally before pushing. This closes the structural gap that allowed
+d33cc15 (the switch from `go-face:v0.0.3` to `go-face/dlib{19,20}:0.1.2`) to
+ship with a broken link step because `make -n image-build` (dry run) was
+substituted for an actual build:
+
+| Target | Catches |
+|--------|---------|
+| `make test` | Host-side pure-Go regressions (fast feedback, <1s) |
+| `make test-docker` | `internal/usecases` CGo compile regressions + unit tests linked against dlib |
+| `make test-integration` | Real classify/recognize pipeline regressions against baked-in models |
+| `make e2e` | End-to-end Dockerfile.go-face + binary boot + face classification on the primary lineage |
+| `make image-verify` | Same as `e2e` but across **every** CI matrix lineage (catches lineage-specific regressions before CI) |
+
+Never substitute `make -n image-build` or any other `-n` dry-run in place of
+an actual build for verification — the whole point is to exercise the real
+Docker build + link + run, and dry-runs skip exactly that.
 
 ## Key Variables
 
@@ -98,6 +123,9 @@ A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old w
 
 Last reviewed: 2026-04-11
 
+- [x] ~~`libdlib.a` static archive missing from upstream dlib-docker images~~ (done 2026-04-11 — root cause of the d33cc15 CI regression. `dlib-docker/Dockerfile` built dlib with `-DBUILD_SHARED_LIBS=ON` only, so `/usr/local/lib/libdlib.a` was never produced; `go-face/dlib{19,20}:0.1.2` inherited the gap; this repo's `-extldflags -static` + `static_build` tag build broke with `/usr/bin/ld: cannot find -ldlib`. Fix: upstream `dlib-docker/Dockerfile` now configures + builds dlib twice (`BUILD_SHARED_LIBS=ON` then `OFF` with `CMAKE_POSITION_INDEPENDENT_CODE=ON`) so both `libdlib.so` + `libdlib.a` land in `/usr/local/lib`. Added `ENV LIBRARY_PATH=/usr/local/lib` in the upstream Dockerfile so downstream static linking resolves the archive without per-consumer CFLAGS knowledge. Verified end-to-end: dlib-docker → go-face → go-face-recognition → compiled binary classifies Trump in baked-in `unknown.jpg` in <1s)
+- [x] ~~`make test-docker` / `make test-integration` / `make e2e` / `make image-verify` targets~~ (done 2026-04-11 — closes the structural gap that let d33cc15 ship. `make test-docker` runs the full `internal/...` suite inside the builder image (CGO/dlib host-toolchain-free); `make test-integration` runs `//go:build integration` tagged tests exercising the real dlib classify/recognize pipeline against baked-in `models/`, `persons/`, `images/unknown.jpg`; `make e2e` builds `Dockerfile.go-face` against the primary `BUILDER_IMAGE` and asserts ≥1 face is found in the classification output; `make image-verify` loops the same build + smoke over EVERY CI matrix lineage pin (`BUILDER_DLIB19` + `BUILDER_DLIB20`) mirroring the `ci.yml` `strategy.matrix.include[].builder` entries. Pre-push checklist in this file now lists all four as required before any PR touching `Dockerfile.go-face` or the matrix pins)
+- [x] ~~Seed unit + integration tests (project had zero `*_test.go` files at start of 2026-04-11)~~ (done 2026-04-11 — `internal/entity/person_test.go` + `internal/entity/drawer_test.go` + `internal/usecases/load_persons_test.go` run on host (entity hits 91.9% statement coverage). `internal/usecases/recognize_integration_test.go` (build tag `integration`) exercises the full dlib flow against `models/` + `persons/` + `images/unknown.jpg` via `t.Chdir(repoRoot)` — only runs via `make test-integration` inside the builder image)
 - [x] ~~Scheduled upstream lineage discovery workflow~~ (done 2026-04-11 — `.github/workflows/discover-go-face-lineages.yml` runs weekly on Monday 06:00 UTC, scans ghcr.io/andriykalashnykov/go-face/dlib{15..40} via the anonymous Docker Registry v2 token flow, diffs against `ci.yml` matrix, and opens one idempotent discovery issue per new lineage. Issue body cites the "Adding a new go-face dlib lineage" playbook in CLAUDE.md with tag + digest pre-filled. No auto-PR or auto-merge — chain of trust preserved)
 - [x] ~~"Adding a new go-face dlib lineage" playbook in CLAUDE.md~~ (done 2026-04-11 — 4-step playbook with primary-flip rubric; Steps 1/2/4 mechanical, Step 3 explicitly gated on maintainer judgment)
 - [x] ~~Matrix CI across upstream `go-face/dlib19` and `go-face/dlib20` builder lineages~~ (done 2026-04-11 — `.github/workflows/ci.yml` docker job gained `strategy.matrix.include` with per-lineage builder pin, cache scope, scan/smoke container suffix, and tag suffix; Renovate custom regex manager + `go-face builder images` group track both pins)
