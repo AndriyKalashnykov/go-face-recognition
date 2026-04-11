@@ -480,22 +480,44 @@ jobs:
           echo "=== signed release bundle ==="
           ls -la
 
-      - name: Create GitHub Release (if not already present)
+      - name: Create or publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
-          if gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists — will upload assets to it"
-          else
-            echo "Creating release ${TAG}"
-            gh release create "${TAG}" \
-              --repo "${{ github.repository }}" \
-              --verify-tag \
-              --generate-notes \
-              --title "${TAG}"
-          fi
+          # Three-way state machine: missing / draft / published.
+          #
+          # `gh release view` finds DRAFT releases as well as published
+          # ones. Deleting a git tag that has a published release demotes
+          # the release to draft state (GitHub behavior, not reversible
+          # via a subsequent tag push), so a naive "skip if view succeeds"
+          # check leaves the release stuck as a permanent draft invisible
+          # to shields.io and anonymous GitHub UI consumers. Seen in
+          # dlib-docker on 2026-04-11 after the libdlib.a fix re-cut
+          # v19.24.9 + v20.0.1 — see CLAUDE.md "GHCR package cleanup —
+          # gotchas" for the full post-mortem.
+          #
+          # Fix: inspect .isDraft explicitly and promote drafts.
+          existing=$(gh release view "${TAG}" --repo "${{ github.repository }}" \
+            --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          case "${existing}" in
+            missing)
+              echo "No release for ${TAG} — creating one"
+              gh release create "${TAG}" \
+                --repo "${{ github.repository }}" \
+                --verify-tag \
+                --generate-notes \
+                --title "${TAG}"
+              ;;
+            false)
+              echo "Published release for ${TAG} already exists — will upload assets to it"
+              ;;
+            true)
+              echo "Draft release for ${TAG} exists (leftover from a tag re-push) — promoting to published"
+              gh release edit "${TAG}" --repo "${{ github.repository }}" --draft=false
+              ;;
+          esac
 
       - name: Upload release assets
         working-directory: artifacts
