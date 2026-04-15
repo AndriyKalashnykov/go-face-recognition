@@ -222,10 +222,17 @@ e2e: deps
 # Builds via docker-compose.yml (Dockerfile.dlib-docker-go) instead of
 # Dockerfile.go-face — this exercises the compose wiring (volume mounts,
 # build context, service definition) that `make e2e` does not.
+#
+# Uses `docker compose run` (not `up`) because Dockerfile.dlib-docker-go
+# has CMD ["tail","-f","/dev/null"] so that `make image-run-*` gets an
+# interactive shell container. `run --rm --entrypoint /app/main app`
+# overrides the CMD to actually execute the classification pipeline and
+# exits when /app/main returns, which is what we need for a CI gate.
 e2e-compose: deps
-	@echo "→ e2e-compose: docker compose up --build (Dockerfile.dlib-docker-go)"
+	@echo "→ e2e-compose: docker compose build (Dockerfile.dlib-docker-go)"
 	@docker compose build --quiet
-	@docker compose up --abort-on-container-exit --exit-code-from app | tee /tmp/gfr-e2e-compose.log
+	@echo "→ e2e-compose: docker compose run --entrypoint /app/main app"
+	@docker compose run --rm --entrypoint /app/main -T app | tee /tmp/gfr-e2e-compose.log
 	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e-compose.log \
 		|| { echo "FAIL: e2e-compose did not find any faces"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
 	@grep -qE 'Person: (Trump|Biden)' /tmp/gfr-e2e-compose.log \
