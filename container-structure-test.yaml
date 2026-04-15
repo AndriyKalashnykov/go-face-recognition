@@ -46,4 +46,6 @@ commandTests:
       - -c
       - 'test -x /app/main && stat -c "%s" /app/main'
     # Binary should be several MB; match any size >= 7 digits (>= 1 MB).
-    expectedOutput: ["^[0-9]{7,}$"]
+    # No anchors: CST regex runs against stdout with trailing newline, and
+    # '$' doesn't match before that newline on all CST versions.
+    expectedOutput: ["[0-9]{7,}"]
