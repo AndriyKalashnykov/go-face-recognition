@@ -1,0 +1,47 @@
+schemaVersion: 2.0.0
+
+# Runtime contract assertions for the published go-face-recognition image.
+# Mirrors invariants enforced by Dockerfile.go-face so that rebase / digest
+# drift on the upstream builder cannot silently regress them. Runs under
+# GoogleContainerTools/container-structure-test in the docker CI matrix.
+
+metadataTest:
+  entrypoint: ["/app/main"]
+  exposedPorts: []
+  labels:
+    - key: org.opencontainers.image.licenses
+      value: MIT
+    - key: org.opencontainers.image.title
+      value: Face recognition in Go with Dlib
+
+fileExistenceTests:
+  - name: main binary present
+    path: /app/main
+    shouldExist: true
+    permissions: "-rwxr-xr-x"
+  - name: models directory baked in
+    path: /app/models
+    shouldExist: true
+    isExecutableBy: any
+  - name: persons directory baked in
+    path: /app/persons
+    shouldExist: true
+  - name: fonts directory baked in
+    path: /app/fonts
+    shouldExist: true
+  - name: images directory baked in
+    path: /app/images
+    shouldExist: true
+
+commandTests:
+  - name: runs as non-root UID 10001
+    command: id
+    args: ["-u"]
+    expectedOutput: ["^10001$"]
+  - name: main is a statically-linked ELF
+    command: sh
+    args:
+      - -c
+      - |
+        file /app/main | grep -qE 'statically linked' && echo OK
+    expectedOutput: ["^OK$"]

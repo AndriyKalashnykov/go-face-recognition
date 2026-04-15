@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 # Ensure tools installed to ~/.local/bin and $(GOPATH)/bin (hadolint, act,
 # gitleaks, actionlint, govulncheck, trivy, shellcheck, etc.) are on PATH for
 # every recipe — needed inside the act runner container where neither path is
@@ -7,9 +9,9 @@ export PATH := $(HOME)/.local/bin:$(HOME)/go/bin:$(PATH)
 # ──────────────────────────────────────────────────────────────
 # Tool versions (pinned, Renovate-tracked via inline comments)
 # ──────────────────────────────────────────────────────────────
-# renovate: datasource=github-releases depName=nvm-sh/nvm
-NVM_VERSION        := 0.40.4
-# Source of truth: .nvmrc (major version only, e.g. "24")
+# Source of truth: .mise.toml (go, node). Keep `.nvmrc` around because some
+# tooling (notably `corepack` / IDE integrations) reads it directly; mise
+# reads it natively too.
 NODE_VERSION       := $(shell cat .nvmrc 2>/dev/null || echo 24)
 # renovate: datasource=docker depName=golang
 GO_VER             := 1.26.2
@@ -28,7 +30,13 @@ GITLEAKS_VERSION   := 8.30.1
 # renovate: datasource=github-releases depName=aquasecurity/trivy
 TRIVY_VERSION      := 0.69.3
 # renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
-GOVULNCHECK_VERSION := 1.1.4
+GOVULNCHECK_VERSION := 1.2.0
+# renovate: datasource=docker depName=minlag/mermaid-cli
+MERMAID_CLI_VERSION := 11.12.0
+# renovate: datasource=docker depName=plantuml/plantuml
+PLANTUML_VERSION    := 1.2026.2
+# renovate: datasource=github-releases depName=GoogleContainerTools/container-structure-test
+CONTAINER_STRUCTURE_TEST_VERSION := 1.22.1
 
 DOCKER_PLATFORM    ?= linux/amd64
 # Primary builder lineage for local `make image-build` — matches the CI matrix
@@ -39,11 +47,21 @@ DOCKER_PLATFORM    ?= linux/amd64
 BUILDER_IMAGE      ?= ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4
 IMAGE_REPO         ?= andriykalashnykov/go-face-recognition
 
+# Per-CI-matrix-lineage builder image pins. These MUST mirror the
+# .github/workflows/ci.yml docker job `strategy.matrix.include[].builder`
+# entries exactly so `make image-verify` exercises the same chain of trust
+# as GitHub Actions. When a lineage is added or bumped upstream, update both
+# this block AND the ci.yml matrix in the same PR (Renovate's
+# "go-face builder images" group rule collapses the bumps into one PR).
+BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@sha256:c30c97c5d5a664d5f711f17d81a65d9558e17eeb73c0d7a76ff8dc11f6d1d958
+BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.4@sha256:4711c37c29f7af3623297b8a28fa135ed7f7e001d5688661916921bde7948c51
+
 # ──────────────────────────────────────────────────────────────
 # Project metadata
 # ──────────────────────────────────────────────────────────────
 projectname     ?= go-face-recognition
 CURRENTTAG      := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+IMAGE_TAG       ?= $(CURRENTTAG)
 NEWTAG          ?= $(shell bash -c 'read -p "Please provide a new tag (current tag - $(CURRENTTAG)): " newtag; echo $$newtag')
 SEMVER_REGEX    := ^v[0-9]+\.[0-9]+\.[0-9]+$$
 
@@ -64,6 +82,7 @@ deps:
 	@command -v go     >/dev/null 2>&1 || { echo "ERROR: go is not installed";     exit 1; }
 	@command -v git    >/dev/null 2>&1 || { echo "ERROR: git is not installed";    exit 1; }
 	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed"; exit 1; }
+	@docker buildx version >/dev/null 2>&1 || { echo "ERROR: docker buildx is not installed"; exit 1; }
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint v$(GOLANGCI_VERSION)..."; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $$(go env GOPATH)/bin v$(GOLANGCI_VERSION); }
 	@echo "All dependencies satisfied."
@@ -121,12 +140,8 @@ deps-govulncheck: deps
 
 #clean: @ Remove build artifacts and generated files
 clean:
-	@rm -rf cmd/main coverage.out testdatas version.txt
+	@rm -rf cmd/main coverage.out version.txt
 	@echo "Cleaned build artifacts."
-
-#testdata: @ Clone test data repository
-testdata: deps
-	@git clone https://github.com/Kagami/go-face-testdata testdatas
 
 #test: @ Run unit tests on host (scoped to pure-Go packages that do not need CGO/dlib)
 # The internal/usecases package transitively imports go-face (dlib C bindings),
@@ -155,11 +170,11 @@ test-docker: deps
 		$(BUILDER_IMAGE) \
 		go test -cover -parallel=1 -v ./internal/...
 
-#test-integration: @ Run integration tests (real dlib pipeline) inside the builder image
+#integration-test: @ Run integration tests (real dlib pipeline) inside the builder image
 # Tests tagged with `//go:build integration` exercise classify/recognize against
 # the baked-in models/, persons/, and images/ directories. Only runs inside the
 # builder image because it links against dlib.
-test-integration: deps
+integration-test: deps
 	@docker run --rm \
 		-v $(CURDIR):/app \
 		-w /app \
@@ -167,12 +182,18 @@ test-integration: deps
 		-e GOFLAGS=-mod=mod \
 		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 		$(BUILDER_IMAGE) \
-		go test -tags integration -v -count=1 ./internal/usecases/...
+		go test -tags integration -v -count=1 -race ./internal/usecases/...
+
+# Alias kept for muscle memory; `integration-test` is the canonical skill
+# target. Remove once no tooling / muscle memory references the old name.
+.PHONY: test-integration
+test-integration: integration-test
 
 #e2e: @ Build Dockerfile.go-face and run the compiled binary against baked-in test data
 # Mirrors the CI docker job's GATE 1+GATE 3 (scan build + smoke test) on a
 # single lineage (BUILDER_IMAGE default). Use `make image-verify` to run the
-# same gates against every CI matrix lineage.
+# same gates against every CI matrix lineage. Asserts face count AND
+# identity classification AND annotated result.jpg is produced.
 e2e: deps
 	@echo "→ e2e: building go-face-recognition:e2e with BUILDER_IMAGE=$(BUILDER_IMAGE)"
 	@docker build --quiet \
@@ -180,19 +201,37 @@ e2e: deps
 		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
 		-t go-face-recognition:e2e . >/dev/null
 	@echo "→ e2e: running the classification pipeline"
-	@docker run --rm --entrypoint /app/main go-face-recognition:e2e | tee /tmp/gfr-e2e.log
+	@docker rm -f gfr-e2e >/dev/null 2>&1 || true
+	@docker run --name gfr-e2e --entrypoint /app/main go-face-recognition:e2e | tee /tmp/gfr-e2e.log
 	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e.log \
-		|| { echo "FAIL: e2e did not find any faces in the baked-in unknown.jpg"; exit 1; }
-	@echo "PASS: e2e classification pipeline produced ≥1 face."
+		|| { echo "FAIL: e2e did not find any faces in baked-in unknown.jpg"; docker rm -f gfr-e2e >/dev/null 2>&1; exit 1; }
+	@grep -qE 'Person: (Trump|Biden)' /tmp/gfr-e2e.log \
+		|| { echo "FAIL: e2e did not classify any baked-in identity (expected Trump or Biden)"; docker rm -f gfr-e2e >/dev/null 2>&1; exit 1; }
+	@tmpjpg=$$(mktemp --suffix=.jpg); \
+		docker cp gfr-e2e:/app/images/result.jpg "$$tmpjpg" >/dev/null 2>&1 \
+			|| { echo "FAIL: e2e did not produce /app/images/result.jpg"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+		[ -s "$$tmpjpg" ] \
+			|| { echo "FAIL: result.jpg is empty"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+		file -b "$$tmpjpg" | grep -qi 'JPEG image data' \
+			|| { echo "FAIL: result.jpg is not JPEG ($$( file -b $$tmpjpg ))"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+		rm -f "$$tmpjpg"
+	@docker rm -f gfr-e2e >/dev/null 2>&1 || true
+	@echo "PASS: e2e classification pipeline — face count, identity, result.jpg all verified."
 
-# Per-CI-matrix-lineage builder image pins. These MUST mirror the
-# .github/workflows/ci.yml docker job `strategy.matrix.include[].builder`
-# entries exactly so `make image-verify` exercises the same chain of trust
-# as GitHub Actions. When a lineage is added or bumped upstream, update both
-# this block AND the ci.yml matrix in the same PR (Renovate's
-# "go-face builder images" group rule collapses the bumps into one PR).
-BUILDER_DLIB20 := ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@sha256:c30c97c5d5a664d5f711f17d81a65d9558e17eeb73c0d7a76ff8dc11f6d1d958
-BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.4@sha256:4711c37c29f7af3623297b8a28fa135ed7f7e001d5688661916921bde7948c51
+#e2e-compose: @ Run the pipeline through docker-compose.yml (catches compose drift)
+# Builds via docker-compose.yml (Dockerfile.dlib-docker-go) instead of
+# Dockerfile.go-face — this exercises the compose wiring (volume mounts,
+# build context, service definition) that `make e2e` does not.
+e2e-compose: deps
+	@echo "→ e2e-compose: docker compose up --build (Dockerfile.dlib-docker-go)"
+	@docker compose build --quiet
+	@docker compose up --abort-on-container-exit --exit-code-from app | tee /tmp/gfr-e2e-compose.log
+	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e-compose.log \
+		|| { echo "FAIL: e2e-compose did not find any faces"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
+	@grep -qE 'Person: (Trump|Biden)' /tmp/gfr-e2e-compose.log \
+		|| { echo "FAIL: e2e-compose did not classify any baked-in identity"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
+	@docker compose down --remove-orphans >/dev/null 2>&1 || true
+	@echo "PASS: e2e-compose pipeline — face count + identity verified through docker-compose.yml."
 
 #image-verify: @ Build + smoke-test Dockerfile.go-face against every CI matrix lineage
 # This is the local equivalent of the docker job's GATE 1 (build-for-scan) +
@@ -205,7 +244,7 @@ BUILDER_DLIB19 := ghcr.io/andriykalashnykov/go-face/dlib19:0.1.4@sha256:4711c37c
 # Run this as part of the pre-push checklist whenever Dockerfile.go-face,
 # ci.yml matrix pins, or any Makefile `BUILDER_*` variable is touched.
 image-verify: deps
-	@set -e; \
+	@set -euo pipefail; \
 	for spec in \
 		"dlib20:$(BUILDER_DLIB20)" \
 		"dlib19:$(BUILDER_DLIB19)"; \
@@ -218,11 +257,21 @@ image-verify: deps
 			--build-arg BUILDER_IMAGE=$$builder \
 			-t go-face-recognition:verify-$$lineage . >/dev/null; \
 		echo "→ image-verify[$$lineage]: running smoke test"; \
-		docker run --rm --entrypoint /app/main go-face-recognition:verify-$$lineage \
+		docker rm -f gfr-verify-$$lineage >/dev/null 2>&1 || true; \
+		docker run --name gfr-verify-$$lineage --entrypoint /app/main go-face-recognition:verify-$$lineage \
 			| tee /tmp/gfr-verify-$$lineage.log; \
 		grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-verify-$$lineage.log \
-			|| { echo "FAIL: $$lineage smoke test did not find any faces"; exit 1; }; \
-		echo "PASS: image-verify[$$lineage]"; \
+			|| { echo "FAIL: $$lineage smoke test did not find any faces"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; exit 1; }; \
+		grep -qE 'Person: (Trump|Biden)' /tmp/gfr-verify-$$lineage.log \
+			|| { echo "FAIL: $$lineage did not classify any baked-in identity"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; exit 1; }; \
+		tmpjpg=$$(mktemp --suffix=.jpg); \
+		docker cp gfr-verify-$$lineage:/app/images/result.jpg "$$tmpjpg" >/dev/null 2>&1 \
+			|| { echo "FAIL: $$lineage did not produce result.jpg"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+		file -b "$$tmpjpg" | grep -qi 'JPEG image data' \
+			|| { echo "FAIL: $$lineage result.jpg is not JPEG"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+		rm -f "$$tmpjpg"; \
+		docker rm -f gfr-verify-$$lineage >/dev/null 2>&1 || true; \
+		echo "PASS: image-verify[$$lineage] — face count + identity + result.jpg verified."; \
 	done
 	@echo "PASS: image-verify across all CI matrix lineages."
 
@@ -244,15 +293,26 @@ build-arm64: deps
 		GOARCH=arm64 \
 		go build --ldflags "-s -w" -o cmd/main cmd/main.go
 
-#format: @ Auto-format Go source code
+#format: @ Auto-format Go source code (gofmt + goimports via golangci-lint fmt)
 format: deps
-	@gofmt -s -w .
+	@golangci-lint fmt ./...
 	@go mod tidy
+
+#format-check: @ Check Go source is formatted (fails if gofmt/goimports would rewrite)
+format-check: deps
+	@diff=$$(gofmt -l . 2>/dev/null); \
+		if [ -n "$$diff" ]; then \
+			echo "ERROR: the following files need formatting:"; \
+			echo "$$diff"; \
+			echo "Run 'make format'."; \
+			exit 1; \
+		fi
+	@echo "Go source is properly formatted."
 
 #lint: @ Run Go linters (golangci-lint with gosec/gocritic/errorlint) and hadolint
 lint: deps deps-hadolint
 	@golangci-lint run ./...
-	@for f in $(DOCKERFILES); do echo "hadolint $$f"; hadolint $$f || exit 1; done
+	@hadolint $(DOCKERFILES)
 
 #lint-ci: @ Lint GitHub Actions workflows with actionlint
 lint-ci: deps-actionlint
@@ -270,6 +330,17 @@ trivy-fs: deps-trivy
 vulncheck: deps-govulncheck
 	@govulncheck ./...
 
+#vulncheck-docker: @ Run govulncheck inside the builder image (bypasses host CGO/dlib requirement)
+vulncheck-docker: deps
+	@docker run --rm \
+		-v $(CURDIR):/app \
+		-w /app \
+		--user root \
+		-e GOFLAGS=-mod=mod \
+		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+		$(BUILDER_IMAGE) \
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) && govulncheck ./..."
+
 # NOTE: `vulncheck` is intentionally NOT included in `static-check`.
 # govulncheck loads packages via `go build`, which for this project requires
 # the full CGO toolchain (libjpeg-dev, libdlib-dev, libopenblas-dev, …) to
@@ -277,18 +348,81 @@ vulncheck: deps-govulncheck
 # target fails early with "jpeglib.h: No such file or directory". Run it
 # manually inside the builder Docker image, or once the C deps are installed.
 # Tracked in CLAUDE.md "Upgrade Backlog" as "Add govulncheck as Docker CI step".
-#static-check: @ Composite quality gate (lint-ci, lint, secrets, trivy-fs, deps-prune-check)
-static-check: lint-ci lint secrets trivy-fs deps-prune-check
+#mermaid-lint: @ Parse every ```mermaid block in markdown files via mermaid-cli (fails on render errors)
+# Runs mermaid-cli (pinned via MERMAID_CLI_VERSION) in a Docker sandbox so
+# no node / npm / puppeteer / chromium is needed on the host. Each extracted
+# block is rendered to SVG; any syntax error from the mermaid parser fails
+# the target. Wired into static-check because broken mermaid silently
+# degrades README rendering on github.com (red "Unable to render rich
+# display" box) and we want that caught in CI, not in production.
+mermaid-lint:
+	@set -euo pipefail; \
+		tmpdir=$$(mktemp -d); \
+		trap 'rm -rf "$$tmpdir"' EXIT; \
+		i=0; \
+		for md in $$(git ls-files '*.md' 2>/dev/null); do \
+			awk '/^```mermaid$$/{flag=1; f=sprintf("%s/block-%04d.mmd", d, ++n); next} \
+			     /^```$$/{if(flag){flag=0}; next} \
+			     flag{print > f}' d="$$tmpdir" "$$md" 2>/dev/null || true; \
+		done; \
+		blocks=$$(ls "$$tmpdir"/*.mmd 2>/dev/null | wc -l); \
+		if [ "$$blocks" = "0" ]; then \
+			echo "No mermaid blocks found — skipping mermaid-lint."; exit 0; \
+		fi; \
+		echo "→ mermaid-lint: rendering $$blocks mermaid block(s) via minlag/mermaid-cli:$(MERMAID_CLI_VERSION)"; \
+		for mmd in "$$tmpdir"/*.mmd; do \
+			out="$${mmd%.mmd}.svg"; \
+			docker run --rm -u $$(id -u):$$(id -g) \
+				-v "$$tmpdir":/data \
+				--entrypoint /home/mermaidcli/node_modules/.bin/mmdc \
+				minlag/mermaid-cli:$(MERMAID_CLI_VERSION) \
+				-p /puppeteer-config.json \
+				-i "/data/$$(basename "$$mmd")" \
+				-o "/data/$$(basename "$$out")" \
+				-q \
+				|| { echo "FAIL: $$mmd does not render"; cat "$$mmd"; exit 1; }; \
+		done; \
+		echo "PASS: all mermaid blocks render cleanly."
+
+DIAGRAM_DIR := docs/diagrams
+DIAGRAM_SRC := $(wildcard $(DIAGRAM_DIR)/*.puml)
+DIAGRAM_OUT := $(patsubst $(DIAGRAM_DIR)/%.puml,$(DIAGRAM_DIR)/out/%.png,$(DIAGRAM_SRC))
+
+#diagrams: @ Render PlantUML architecture diagrams to PNG (docs/diagrams/*.puml → out/*.png)
+diagrams: $(DIAGRAM_OUT)
+
+$(DIAGRAM_DIR)/out/%.png: $(DIAGRAM_DIR)/%.puml
+	@mkdir -p $(DIAGRAM_DIR)/out
+	@echo "→ diagrams: rendering $< via plantuml/plantuml:$(PLANTUML_VERSION)"
+	@docker run --rm -v "$(CURDIR)/$(DIAGRAM_DIR):/work" -w /work \
+		-u $$(id -u):$$(id -g) \
+		-e HOME=/tmp -e _JAVA_OPTIONS=-Duser.home=/tmp \
+		plantuml/plantuml:$(PLANTUML_VERSION) \
+		-tpng -o out $(notdir $<)
+
+#diagrams-clean: @ Remove rendered diagram artefacts (docs/diagrams/out/)
+diagrams-clean:
+	@rm -rf $(DIAGRAM_DIR)/out
+
+#diagrams-check: @ Verify committed PlantUML output matches current source (CI drift gate)
+diagrams-check: diagrams
+	@git diff --exit-code -- $(DIAGRAM_DIR)/out \
+		|| { echo "ERROR: docs/diagrams/*.puml changed but docs/diagrams/out/ not updated. Run 'make diagrams' and commit."; exit 1; }
+	@echo "PASS: committed PlantUML output matches source."
+
+#static-check: @ Composite quality gate (lint-ci, lint, secrets, trivy-fs, mermaid-lint, diagrams-check, deps-prune-check)
+static-check: lint-ci lint secrets trivy-fs mermaid-lint diagrams-check deps-prune-check
 	@echo "Static check passed."
 
 #run: @ Run the application locally
 run: deps
 	@go run cmd/main.go
 
-#update: @ Update dependency packages to latest versions
+#update: @ Update dependency packages to latest versions and run CI
 update: deps
 	@go get -u ./...
 	@go mod tidy
+	@$(MAKE) ci
 
 #release: @ Create and push a new semver tag
 release: deps
@@ -299,52 +433,55 @@ release: deps
 	fi
 	@echo -n "Are you sure to create and push $(NT) tag? [y/N] " && read ans && [ $${ans:-N} = y ]
 	@echo $(NT) > ./version.txt
-	@git add -A
-	@git commit -a -s -m "Cut $(NT) release"
+	@git add version.txt
+	@git commit -s -m "Cut $(NT) release"
 	@git tag $(NT)
 	@git push origin $(NT)
 	@git push
 	@echo "Done."
 
-#image-bootstrap: @ Create Docker buildx multi-platform builder
-image-bootstrap:
-	@docker buildx create --use --platform=linux/arm64,linux/amd64,linux/arm/v7 --name multi-platform-builder
+#image-bootstrap: @ Create Docker buildx multi-platform builder (idempotent)
+image-bootstrap: deps
+	@docker buildx inspect multi-platform-builder >/dev/null 2>&1 \
+		|| docker buildx create --use --platform=linux/arm64,linux/amd64,linux/arm/v7 --name multi-platform-builder
 	@docker buildx inspect --bootstrap
 
 #image-build: @ Build Docker images via buildx
-image-build:
+image-build: deps
 	@docker buildx use multi-platform-builder
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.go-face \
 		--build-arg GO_VER=$(GO_VER) --build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
-		-t $(IMAGE_REPO):latest-go-face .
+		-t $(IMAGE_REPO):$(IMAGE_TAG)-go-face .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.ubuntu.builder \
-		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-builder .
+		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):$(IMAGE_TAG)-builder .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.alpine.runtime \
-		-t $(IMAGE_REPO):latest-runtime .
+		-t $(IMAGE_REPO):$(IMAGE_TAG)-runtime .
 	@docker buildx build --load --platform $(DOCKER_PLATFORM) -f Dockerfile.dlib-docker-go \
-		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):latest-dlib-docker-go .
+		--build-arg GO_VER=$(GO_VER) -t $(IMAGE_REPO):$(IMAGE_TAG)-dlib-docker-go .
 
-#image-run: @ Run Docker images interactively
-image-run:
-	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-runtime /bin/sh
-	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):latest-go-face /bin/sh
+#image-run-runtime: @ Run runtime image interactively
+image-run-runtime: deps
+	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):$(IMAGE_TAG)-runtime /bin/sh
+
+#image-run-go-face: @ Run go-face image interactively
+image-run-go-face: deps
+	@docker run -it --rm --platform $(DOCKER_PLATFORM) $(IMAGE_REPO):$(IMAGE_TAG)-go-face /bin/sh
 
 #image-prune: @ Prune Docker system and buildx cache
-image-prune:
+image-prune: deps
 	@docker system prune
 	@docker buildx prune
 
 #image-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
-image-setup-multiarch:
+image-setup-multiarch: deps
 	@docker run --privileged --rm tonistiigi/binfmt --install all
-	@docker run -it --rm --platform linux/arm64 arm64v8/ubuntu sh
 
 #image-run-ghcr-amd64: @ Run GHCR runtime image on amd64
-image-run-ghcr-amd64:
+image-run-ghcr-amd64: deps
 	@docker run -it --rm --platform linux/amd64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
 
 #image-run-ghcr-arm64: @ Run GHCR runtime image on arm64
-image-run-ghcr-arm64:
+image-run-ghcr-arm64: deps
 	@docker run -it --rm --platform linux/arm64 ghcr.io/andriykalashnykov/go-face-recognition:$(CURRENTTAG)-runtime /bin/sh
 
 #version: @ Print current version (tag)
@@ -354,24 +491,43 @@ version:
 #tag-delete: @ Delete a specific tag locally and remotely
 tag-delete:
 	@if [ -z "$(TAG)" ]; then echo "ERROR: TAG is required. Usage: make tag-delete TAG=v1.0.0"; exit 1; fi
+	@if ! echo "$(TAG)" | grep -qE '$(SEMVER_REGEX)'; then \
+		echo "ERROR: '$(TAG)' is not valid semver (expected vX.Y.Z)"; \
+		exit 1; \
+	fi
+	@echo -n "Are you sure to DELETE tag $(TAG) locally AND on origin? [y/N] " && read ans && [ $${ans:-N} = y ]
 	@rm -f version.txt
+	@git tag --delete $(TAG) 2>/dev/null || true
 	@git push --delete origin $(TAG)
-	@git tag --delete $(TAG)
 
 #deps-prune-check: @ Verify go.mod and go.sum are tidy
 deps-prune-check: deps
-	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
-	@go mod tidy
-	@if ! diff -q go.mod go.mod.bak >/dev/null 2>&1 || ! diff -q go.sum go.sum.bak >/dev/null 2>&1; then \
-		echo "ERROR: go.mod/go.sum not tidy. Run 'go mod tidy'."; \
-		mv go.mod.bak go.mod; mv go.sum.bak go.sum; \
-		exit 1; \
-	fi
-	@rm -f go.mod.bak go.sum.bak
+	@tmp=$$(mktemp -d); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		cp go.mod "$$tmp/go.mod"; \
+		cp go.sum "$$tmp/go.sum"; \
+		go mod tidy; \
+		if ! diff -q go.mod "$$tmp/go.mod" >/dev/null 2>&1 \
+			|| ! diff -q go.sum "$$tmp/go.sum" >/dev/null 2>&1; then \
+			echo "ERROR: go.mod/go.sum not tidy. Run 'go mod tidy'."; \
+			cp "$$tmp/go.mod" go.mod; cp "$$tmp/go.sum" go.sum; \
+			exit 1; \
+		fi
 	@echo "go.mod/go.sum are tidy."
 
-#ci: @ Run the full CI pipeline locally (deps, static-check, test, build)
-ci: deps static-check test build
+#coverage-check: @ Fail if total unit-test coverage falls below 80%
+coverage-check: test
+	@go tool cover -func=coverage.out | awk '/total:/ { \
+		pct=$$3; sub("%","",pct); \
+		if (pct+0 < 80) { \
+			printf "ERROR: coverage %s%% is below 80%% threshold\n", pct; exit 1 \
+		} else { \
+			printf "OK: coverage %s%% meets 80%% threshold\n", pct \
+		} \
+	}'
+
+#ci: @ Run the full CI pipeline locally (deps, format-check, static-check, test, coverage-check, build)
+ci: deps format-check static-check test coverage-check build
 	@echo "CI pipeline passed."
 
 #ci-run: @ Run GitHub Actions workflow locally using act
@@ -379,25 +535,32 @@ ci-run: deps-act
 	@act push --container-architecture linux/amd64 \
 		--artifact-server-path /tmp/act-artifacts
 
-#renovate-bootstrap: @ Install nvm and npm for Renovate
+#renovate-bootstrap: @ Install mise + Node (per .mise.toml) for Renovate
 renovate-bootstrap:
+	@command -v mise >/dev/null 2>&1 || { \
+		echo "Installing mise (no root required, installs to ~/.local/bin)..."; \
+		curl -fsSL https://mise.run | sh; \
+	}
 	@command -v node >/dev/null 2>&1 || { \
-		echo "Installing nvm $(NVM_VERSION)..."; \
-		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$(NVM_VERSION)/install.sh | bash; \
-		export NVM_DIR="$$HOME/.nvm"; \
-		[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-		nvm install $(NODE_VERSION); \
+		echo "Installing Node $(NODE_VERSION) via mise..."; \
+		mise install node@$(NODE_VERSION); \
 	}
 
 #renovate-validate: @ Validate Renovate configuration
 renovate-validate: renovate-bootstrap
-	@npx --yes renovate --platform=local
+	@if [ -n "$$GH_ACCESS_TOKEN" ]; then \
+		GITHUB_COM_TOKEN=$$GH_ACCESS_TOKEN npx --yes renovate --platform=local; \
+	else \
+		echo "Warning: GH_ACCESS_TOKEN not set, some dependency lookups may fail"; \
+		npx --yes renovate --platform=local; \
+	fi
 
 .PHONY: help deps deps-act deps-hadolint deps-shellcheck deps-actionlint \
-        deps-gitleaks deps-trivy deps-govulncheck clean testdata test \
-        test-docker test-integration e2e image-verify build \
-        build-arm64 format lint lint-ci secrets trivy-fs vulncheck static-check \
-        run update release image-bootstrap image-build image-run image-prune \
+        deps-gitleaks deps-trivy deps-govulncheck clean test \
+        test-docker integration-test e2e e2e-compose image-verify build \
+        build-arm64 format format-check lint lint-ci mermaid-lint secrets trivy-fs vulncheck static-check \
+        run update release image-bootstrap image-build image-run-runtime image-run-go-face image-prune \
         image-setup-multiarch image-run-ghcr-amd64 image-run-ghcr-arm64 \
         version tag-delete ci ci-run renovate-bootstrap renovate-validate \
-        deps-prune-check
+        deps-prune-check coverage-check vulncheck-docker \
+        diagrams diagrams-clean diagrams-check

@@ -36,22 +36,30 @@ make build            # Build Go binary for Linux amd64
 make build-arm64      # Build Go binary for macOS arm64
 make test             # Host unit tests (scoped to internal/entity — pure Go, no CGO)
 make test-docker      # Full internal/... unit-test suite inside the builder image (CGO+dlib)
-make test-integration # //go:build integration tests inside the builder image (real dlib pipeline)
-make e2e              # Build Dockerfile.go-face with primary BUILDER_IMAGE + run the binary; asserts ≥1 face
+make integration-test # //go:build integration tests inside the builder image (real dlib pipeline)
+make e2e              # Build Dockerfile.go-face + run binary; asserts face count, identity, result.jpg
+make e2e-compose      # Run the pipeline through docker-compose.yml (catches compose drift)
 make image-verify     # Build + smoke test Dockerfile.go-face against EVERY CI matrix lineage (pre-push gate)
-make format           # Auto-format Go source code
+make format           # Auto-format Go source code (golangci-lint fmt + goimports)
+make format-check     # Fail if any file needs formatting (CI gate; non-mutating)
 make lint             # golangci-lint (gosec, gocritic, …) + hadolint on all Dockerfile.*
 make lint-ci          # Lint GitHub Actions workflows with actionlint + shellcheck
+make mermaid-lint     # Render every ```mermaid block via minlag/mermaid-cli; fail on parse errors
+make diagrams         # Render docs/diagrams/*.puml → docs/diagrams/out/*.png via pinned plantuml/plantuml
+make diagrams-check   # CI drift gate: fails if rendered PNGs no longer match .puml source
 make secrets          # Scan for hardcoded secrets with gitleaks
 make trivy-fs         # Filesystem vulnerability / secret / misconfig scan (Trivy)
-make vulncheck        # Go dependency vulnerability scan (requires C toolchain)
-make static-check     # Composite gate (lint-ci, lint, secrets, trivy-fs, deps-prune-check)
+make vulncheck        # Go dependency vulnerability scan on host (requires C toolchain)
+make vulncheck-docker # Go dependency vulnerability scan inside the builder image (no host C deps)
+make static-check     # Composite gate (lint-ci, lint, secrets, trivy-fs, mermaid-lint, deps-prune-check)
+make coverage-check   # Fail if total unit-test coverage falls below 80%
 make run              # Run the application locally
-make update           # Update Go dependencies
-make ci               # Run full CI pipeline (deps, static-check, test, build)
+make update           # Update Go dependencies + run make ci
+make ci               # Run full CI pipeline (deps, format-check, static-check, test, build)
 make ci-run           # Run GitHub Actions workflow locally using act
-make image-build      # Build Docker images via buildx
-make image-run        # Run Docker images interactively
+make image-build      # Build Docker images via buildx (uses IMAGE_TAG, defaults to current tag)
+make image-run-runtime    # Run runtime image interactively
+make image-run-go-face    # Run go-face image interactively
 make release          # Create and push a new semver tag
 make version          # Print current version tag
 ```
@@ -69,8 +77,9 @@ substituted for an actual build:
 |--------|---------|
 | `make test` | Host-side pure-Go regressions (fast feedback, <1s) |
 | `make test-docker` | `internal/usecases` CGo compile regressions + unit tests linked against dlib |
-| `make test-integration` | Real classify/recognize pipeline regressions against baked-in models |
-| `make e2e` | End-to-end Dockerfile.go-face + binary boot + face classification on the primary lineage |
+| `make integration-test` | Real classify/recognize pipeline regressions + error branches against baked-in models |
+| `make e2e` | End-to-end Dockerfile.go-face + binary boot + face count + identity classification + result.jpg artifact on the primary lineage |
+| `make e2e-compose` | Same end-to-end assertions exercised through `docker-compose.yml` (Dockerfile.dlib-docker-go path) — catches compose wiring drift |
 | `make image-verify` | Same as `e2e` but across **every** CI matrix lineage (catches lineage-specific regressions before CI) |
 
 Never substitute `make -n image-build` or any other `-n` dry-run in place of
@@ -89,18 +98,26 @@ Docker build + link + run, and dry-runs skip exactly that.
 | `SHELLCHECK_VERSION` | `0.11.0` | shellcheck version (used by actionlint) |
 | `GITLEAKS_VERSION` | `8.30.1` | gitleaks version for secret scanning |
 | `TRIVY_VERSION` | `0.69.3` | Trivy version for security scanning |
-| `GOVULNCHECK_VERSION` | `1.1.4` | govulncheck version for Go CVE scanning |
-| `NVM_VERSION` | `0.40.4` | nvm version for Renovate bootstrap |
-| `NODE_VERSION` | `$(shell cat .nvmrc)` → `24` | Node major version (source of truth: `.nvmrc`) |
+| `GOVULNCHECK_VERSION` | `1.2.0` | govulncheck version for Go CVE scanning |
+| `MERMAID_CLI_VERSION` | `11.12.0` | minlag/mermaid-cli image tag used by `make mermaid-lint` |
+| `PLANTUML_VERSION` | `1.2026.2` | plantuml/plantuml image tag used by `make diagrams` |
+| `CONTAINER_STRUCTURE_TEST_VERSION` | `1.22.1` | container-structure-test CLI version used by the docker CI job |
+| `NODE_VERSION` | `$(shell cat .nvmrc)` → `24` | Node major version (source of truth: `.nvmrc`; also declared in `.mise.toml`) |
 | `DOCKER_PLATFORM` | `linux/amd64` | Default Docker build platform |
-| `BUILDER_IMAGE` | `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.2` (Makefile default) | Base builder image override passed to `Dockerfile.go-face` as `--build-arg`. CI builds both `dlib19` and `dlib20` lineages via a matrix (see CI/CD). |
+| `BUILDER_IMAGE` | `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4` (Makefile default) | Base builder image override passed to `Dockerfile.go-face` as `--build-arg`. CI builds both `dlib19` and `dlib20` lineages via a matrix (see CI/CD). |
 | `IMAGE_REPO` | `andriykalashnykov/go-face-recognition` | Docker image repository |
 
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main, tags, and pull requests:
 
-1. **docker** job: Build multi-arch Docker image (amd64, arm64, arm/v7); push to GHCR on tags only. Authenticates with the built-in `GITHUB_TOKEN` (no PAT required). Runs as a `strategy.matrix` over every supported `dlib-docker` major lineage that upstream `go-face` publishes (currently `dlib19` and `dlib20`); each cell reruns all five hardening gates (build-for-scan → Trivy → smoke → multi-arch build/push → cosign sign) independently with its own GHA cache scope and its own scan/smoke container names. `fail-fast: false` so a regression in one lineage does not mask the other.
+1. **static-check** job: runs `make lint-ci secrets trivy-fs` on host (pieces that do not require CGo/dlib).
+2. **test** job: runs `make test` on host (pure-Go `internal/entity` suite, 98%+ coverage).
+3. **integration-test** job: runs `make integration-test` (pulls the public `go-face/dlib20` builder image and executes `//go:build integration` tests with `-race`).
+4. **e2e-compose** job: runs `make e2e-compose` — exercises `docker-compose.yml` (Dockerfile.dlib-docker-go build path) and asserts face count + identity. Catches compose drift that `docker` job (Dockerfile.go-face) cannot see.
+5. **docker** job: Build multi-arch Docker image (amd64, arm64, arm/v7); push to GHCR on tags only. Authenticates with the built-in `GITHUB_TOKEN` (no PAT required). Runs as a `strategy.matrix` over every supported `dlib-docker` major lineage that upstream `go-face` publishes (currently `dlib19` and `dlib20`); each cell reruns all seven hardening gates (build-for-scan → Trivy image scan → smoke test → container-structure-test → multi-arch build/push → cosign sign → SBOM attest via syft + `cosign attest --type spdxjson`) independently with its own GHA cache scope and its own scan/smoke container names. `fail-fast: false` so a regression in one lineage does not mask the other. Gated on `needs: [static-check, test]`.
+6. **release-artifacts-extract + release-artifacts-publish** jobs (tag-gated): split into two jobs by design — `extract` is a per-lineage matrix that pulls each platform manifest and builds tarballs; `publish` aggregates them, generates checksums.txt, cosign-blob-signs, and uploads to the GitHub Release. This two-job split deviates from the canonical single-`docker` job convention and is documented here as an accepted exception: the matrix fan-out is required for multi-lineage × multi-arch tarball extraction and cannot live inside the single `docker` matrix cell without serializing the work.
+7. **ci-pass** aggregator: `if: always()` with `needs:` enumerating every upstream job; branch protection references this job only, so matrix-cell renames don't silently bypass protection.
 
 Build and test happen inside the Docker multi-stage build since CGO/dlib dependencies are only available in the builder image. Lint and test via `make ci` are for local development.
 
@@ -121,7 +138,36 @@ A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old w
 
 ## Upgrade Backlog
 
-Last reviewed: 2026-04-11
+Last reviewed: 2026-04-14
+
+- [x] ~~Migrate `renovate-bootstrap` from nvm → mise (portfolio-wide policy)~~ (done 2026-04-14 — `.mise.toml` declares `go = "1.26.2"` and `node = "24"`; `renovate-bootstrap` installs mise via `https://mise.run` and provisions Node via `mise install node@$(NODE_VERSION)`. Dropped `NVM_VERSION` constant and its Renovate comment. `.nvmrc` retained since mise reads it natively and a handful of IDE integrations still consume it)
+- [x] ~~Bump `GOVULNCHECK_VERSION` 1.1.4 → 1.2.0~~ (done 2026-04-14)
+- [x] ~~Add `vulncheck-docker` target that runs govulncheck inside the builder image (bypasses host CGO dep on libjpeg/dlib)~~ (done 2026-04-14 — supersedes the "Add govulncheck as Docker CI step" backlog item below)
+- [x] ~~Add host-runnable CI jobs (`static-check`, `test`, `ci-pass` aggregator) + `needs:` edges on `docker` job~~ (done 2026-04-14 — branch protection now references `ci-pass` only; `static-check` runs `lint-ci`/`secrets`/`trivy-fs` on host, `test` runs the pure-Go `internal/entity` suite on host, docker matrix gated on `needs: [static-check, test]`)
+- [x] ~~Rewrite `cleanup-runs.yml` with canonical `RETAIN_DAYS`/`KEEP_MINIMUM` template + add `cleanup-caches` companion job~~ (done 2026-04-14)
+- [x] ~~Extend `make e2e` + `make image-verify` with identity classification assertion (`Person: (Trump\|Biden)` grep) and `result.jpg` artifact verification (`docker cp` + `file` JPEG check)~~ (done 2026-04-14)
+- [x] ~~Add `make e2e-compose` target exercising `docker-compose.yml` (Dockerfile.dlib-docker-go path); wire into CI as its own job~~ (done 2026-04-14)
+- [x] ~~Rename `make test-integration` → `make integration-test` per `/test-coverage-analysis` skill convention; keep `test-integration` as a `.PHONY` alias for muscle memory~~ (done 2026-04-14)
+- [x] ~~Extend `recognize_integration_test.go` with error-branch coverage: faceless training image (RecognizePersons `face == nil` branch), faceless unknown image (ClassifyPersons `len(unkFaces)==0` branch), tight-threshold classification (ClassifyThreshold `catID < 0` branch)~~ (done 2026-04-14)
+- [x] ~~Extend `drawer_test.go` with `loadImage`/`loadFont` error-path tests (missing file, wrong-format bytes, empty path); lifts internal/entity coverage 91.9% → 98.4%~~ (done 2026-04-14)
+- [x] ~~Add container-structure-test to the docker CI job (every matrix cell, every push) — asserts entrypoint, OCI labels, UID=10001, /app subtree presence, statically-linked ELF~~ (done 2026-04-14)
+- [x] ~~Add out-of-band SBOM attestation via Syft + `cosign attest --type spdxjson` (tag-gated, attaches SPDX SBOM to image digest without polluting image manifest — Pattern A compliant)~~ (done 2026-04-14)
+- [x] ~~Add Mermaid C4-Context hero diagram to README Architecture section + `make mermaid-lint` target wired into `static-check`~~ (done 2026-04-14)
+- [x] ~~Bump `CONTAINER_STRUCTURE_TEST_VERSION` 1.19.3 → 1.22.1 + `CST_VERSION` env in ci.yml~~ (done 2026-04-14 — brand-new pin was already 3 minors behind latest on day 1)
+- [x] ~~Bump `anchore/sbom-action/download-syft` v0.17.8 → v0.24.0 (SHA `e22c389904149dbc22b58101806040fa8d37a610`)~~ (done 2026-04-14 — included Syft v1.x migration, subaction surface unchanged)
+- [x] ~~Fix `BUILDER_IMAGE` doc drift in CLAUDE.md Key Variables table (0.1.2 → 0.1.4 to match Makefile)~~ (done 2026-04-14)
+- [ ] **Renovate coverage audit for the new Makefile pins** (`MERMAID_CLI_VERSION`, `CONTAINER_STRUCTURE_TEST_VERSION`). Both are annotated with `# renovate:` comments that should match the generic customManagers regex, but the 3-minor day-1 drift on CST hints the regex may not be catching them. Verify by running `renovate-config-validator` + triggering a dry-run Renovate scan and confirming both constants appear in the extracted dependency list.
+- [ ] **`container-structure-test` 1.20→1.22 changelog scan** — now on 1.22.1, but the version jump skipped 3 minor releases. Scan the changelogs (https://github.com/GoogleContainerTools/container-structure-test/releases) for schema features worth exercising in `container-structure-test.yaml` (candidate: metadata assertions, OCI layer checks, label regex matching).
+- [ ] **`anchore/sbom-action` v0.17→v0.24 smoke test on next tag push** — Syft v1.x migration happened inside this version range; confirm `syft "${first_tag}@${DIGEST}" -o spdx-json` still produces a valid SPDX 2.x JSON that `cosign attest --type spdxjson` accepts. Catch this in the next throwaway RC tag, not v1.x.
+- [ ] **Trivy-gate the upstream builder pull in `integration-test` / `e2e-compose` jobs** — both jobs pull `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@<digest>` on every push and trust it via SHA pin only. Adding `aquasecurity/trivy-action` with `image-ref: ${{ env.BUILDER_IMAGE }}` as a first step would catch a compromised upstream lineage. Low urgency because the pin is digest-immutable — but zero-cost insurance against a theoretical upstream tag rewrite.
+- [ ] **Gate `integration-test` + `e2e-compose` CI jobs on `paths:` filter** — both pull a ~1.5–2 GB builder image on every push (est. +30–90s per PR cold pull). Scope them to fire only when `internal/**`, `Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `docker-compose.yml`, `go.mod`, or `go.sum` changes. Alternatively add `actions/cache` keyed on the builder image digest to amortize the pull across the two jobs.
+- [ ] **Discovery workflow scope clarification** — `.github/workflows/discover-go-face-lineages.yml` discovers new `dlib<N>` majors but does NOT detect new patch/minor tags within existing lineages (that's Renovate's `go-face builder images` group). Add a 1-line comment to the workflow clarifying this so future readers don't assume it covers both dimensions. Also confirm the Renovate group is still cycling — last merge was 0.1.4 on 2026-04-11.
+- [ ] **Consider `npx @mermaid-js/mermaid-cli` (via mise) instead of `minlag/mermaid-cli` Docker image** — current `make mermaid-lint` pulls a single-maintainer Docker image. Switching to the npm package pinned via `.mise.toml` aligns with portfolio mise-first policy and drops one supply-chain hop. Monitor, not urgent — image is maintained, but dependency diversity matters for CI-critical tools.
+- [x] ~~Add PlantUML C4 Context + Container diagrams under `docs/diagrams/*.puml` with modern-flat skinparam theme + `make diagrams` / `diagrams-clean` / `diagrams-check` targets wired into `static-check`; render to committed PNGs so README renders on github.com without a toolchain~~ (done 2026-04-14 — pinned `plantuml/plantuml:1.2026.2`, Renovate-annotated; C4-PlantUML stdlib pinned to v2.11.0; teal Person / indigo System / violet System_Ext palette; `UpdateElementStyle` needs BOTH `"system_ext"` AND `"external_system"` tags in Context diagrams for the palette to apply consistently)
+- [x] ~~Add Mermaid `sequenceDiagram` for the classification pipeline (LoadPersons → NewRecognizer → Recognize → Classify → Draw → Save) to README Architecture section~~ (done 2026-04-14 — autonumbered, validated by `make mermaid-lint`)
+- [x] ~~Add `.github/CODEOWNERS` covering `.github/workflows/**`, all `Dockerfile.*`, `container-structure-test.yaml`, `docker-compose.yml`, `renovate.json`, and `docs/diagrams/**`~~ (done 2026-04-14 — defense-in-depth against future bot workflows; requires owner review on every publishing-adjacent path)
+
+
 
 - [x] ~~`libdlib.a` static archive missing from upstream dlib-docker images~~ (done 2026-04-11 — root cause of the d33cc15 CI regression. `dlib-docker/Dockerfile` built dlib with `-DBUILD_SHARED_LIBS=ON` only, so `/usr/local/lib/libdlib.a` was never produced; `go-face/dlib{19,20}:0.1.2` inherited the gap; this repo's `-extldflags -static` + `static_build` tag build broke with `/usr/bin/ld: cannot find -ldlib`. Fix: upstream `dlib-docker/Dockerfile` now configures + builds dlib twice (`BUILD_SHARED_LIBS=ON` then `OFF` with `CMAKE_POSITION_INDEPENDENT_CODE=ON`) so both `libdlib.so` + `libdlib.a` land in `/usr/local/lib`. Added `ENV LIBRARY_PATH=/usr/local/lib` in the upstream Dockerfile so downstream static linking resolves the archive without per-consumer CFLAGS knowledge. Verified end-to-end: dlib-docker → go-face → go-face-recognition → compiled binary classifies Trump in baked-in `unknown.jpg` in <1s)
 - [x] ~~`linux/arm/v7` missing from go-face CI build-and-push platforms~~ (done 2026-04-11 — latent gap discovered after the libdlib.a fix unblocked CI: this repo's `docker` matrix builds `Dockerfile.go-face` for `linux/amd64,linux/arm64,linux/arm/v7` on top of `ghcr.io/andriykalashnykov/go-face/dlib{19,20}:<tag>`, but upstream `go-face/.github/workflows/ci.yml` only published `linux/amd64,linux/arm64` manifests. Pre-existing bug hidden for weeks because the libdlib.a issue blocked CI earlier so it never reached the multi-arch `Build and push` step. Fix: added `linux/arm/v7` to upstream go-face's docker build-and-push `platforms:` list and cut `v0.1.4` release; this repo's pins now point at `go-face/dlib{19,20}:0.1.4@<3-platform-manifest-digest>`. All 3 secondary Dockerfiles (`Dockerfile.ubuntu.builder`, `Dockerfile.alpine.runtime`, `Dockerfile.dlib-docker-go`) also verified end-to-end on amd64 + arm64 + arm/v7 via QEMU with the compiled binary classifying Trump in all 9 combinations)
@@ -140,7 +186,6 @@ Last reviewed: 2026-04-11
 - [x] ~~`apk upgrade` in runtime stages to pick up CVE patches between alpine image cuts~~ (done 2026-04-10 — closed CVE-2026-28390 openssl + CVE-2026-22184 zlib)
 - [x] ~~Rename typo `Dockerfile.alpine.runtme` → `Dockerfile.alpine.runtime`~~ (done 2026-04-11 — while rebasing the secondary Dockerfile set. Also deleted the unused `Dockerfile.alpine.runtme` (no `.local` suffix) which referenced a deleted `ghcr.io/andriykalashnykov/go-face-recognition:v0.0.3-builder` tag and was not used by any `make` target)
 - [x] ~~`Dockerfile.dlib-docker-go` references deleted `dlib-docker:v20.0.0@sha256:199cece5...`~~ (done 2026-04-11 — both tag and digest were gone from GHCR. Repointed at the rebuilt `dlib-docker:20.0.1` digest published in Phase 1 of the libdlib.a fix chain)
-- [ ] Add govulncheck as Docker CI step (can't run locally due to CGO/dlib)
 
 ## GHCR package cleanup — gotchas
 

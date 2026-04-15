@@ -1,0 +1,42 @@
+@startuml c4-container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/v2.11.0/C4_Container.puml
+
+' Modern flat styling: no shadows, sharper corners, clean sans-serif, modern palette.
+skinparam backgroundColor #FAFAFA
+skinparam shadowing false
+skinparam roundCorner 4
+skinparam defaultFontName "Inter, Helvetica, Arial, sans-serif"
+skinparam defaultFontSize 13
+skinparam ArrowColor #37474F
+skinparam ArrowThickness 1.2
+skinparam rectangleBorderThickness 1.3
+
+UpdateElementStyle("person",        $fontColor="#FFFFFF", $bgColor="#0F766E", $borderColor="#134E4A")
+UpdateElementStyle("container",     $fontColor="#FFFFFF", $bgColor="#2563EB", $borderColor="#1E3A8A")
+UpdateElementStyle("container_db",  $fontColor="#FFFFFF", $bgColor="#7C3AED", $borderColor="#4C1D95")
+UpdateElementStyle("system_ext",    $fontColor="#FFFFFF", $bgColor="#7C3AED", $borderColor="#4C1D95")
+UpdateBoundaryStyle($bgColor="#F1F5F9", $borderColor="#94A3B8", $fontColor="#1E293B")
+
+title Container View — go-face-recognition
+
+Person(operator, "Operator", "Runs ./main or the published image")
+
+System_Boundary(app, "go-face-recognition image") {
+    Container(binary, "main", "Go 1.26.2, CGO + dlib (static libdlib.a)", "Orchestrates LoadPersons → Recognize → Classify → Draw → Save")
+    ContainerDb(models, "models/", "dlib ResNet + shape predictor + MMOD (.dat files)", "Pre-trained weights baked into the image")
+    ContainerDb(persons, "persons/", "Per-identity directories of labeled JPEGs", "Training set (Biden, Trump)")
+    ContainerDb(images, "images/", "JPEG I/O — unknown.jpg input, result.jpg output", "Baked-in sample + annotated output")
+    Container(fonts, "fonts/", "Roboto-Regular.ttf", "Used by drawer to annotate faces")
+}
+
+System_Ext(gface, "go-face/dlib{19,20} builder", "Upstream CGO + dlib image (digest-pinned)")
+
+Rel(operator, binary, "exec", "stdout log + result.jpg")
+Rel(binary, models, "Load", "file I/O")
+Rel(binary, persons, "Load + train", "file I/O")
+Rel(binary, images, "Read unknown.jpg / Write result.jpg", "file I/O")
+Rel(binary, fonts, "Load TTF", "file I/O")
+Rel(gface, binary, "Compile + link (build-time)", "CGO / static")
+
+SHOW_LEGEND()
+@enduml

@@ -4,24 +4,62 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: cleanup-${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions:
   actions: write
 
 jobs:
-  cleanup:
+  cleanup-runs:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    env:
+      RETAIN_DAYS: '7'
+      KEEP_MINIMUM: '5'
     steps:
       - name: Delete old workflow runs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh run list --status completed --limit 100 --json databaseId,createdAt \
-            --jq '[.[] | select(.createdAt < (now - 7*24*3600 | strftime("%Y-%m-%dT%H:%M:%SZ")))] | .[5:] | .[].databaseId' \
-          | xargs -I{} gh run delete {} 2>/dev/null || true
+          set -euo pipefail
+          keep="${KEEP_MINIMUM}"
+          cutoff=$(date -u -d "${RETAIN_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+          gh run list --status completed --limit 500 \
+            --json databaseId,createdAt \
+            --jq "[.[] | select(.createdAt < \"${cutoff}\")] | sort_by(.createdAt) | reverse | .[${keep}:] | .[].databaseId" \
+            | xargs -r -I{} gh run delete {} 2>/dev/null || true
+
+  cleanup-caches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete caches for deleted branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Collect live refs (branches + tags) from the remote.
+          live=$(mktemp)
+          trap 'rm -f "${live}"' EXIT
+          {
+            gh api "repos/${GH_REPO}/branches" --paginate --jq '.[].name' \
+              | sed 's|^|refs/heads/|'
+            gh api "repos/${GH_REPO}/tags" --paginate --jq '.[].name' \
+              | sed 's|^|refs/tags/|'
+          } > "${live}"
+          # Delete every cache whose ref is NOT live.
+          gh api "repos/${GH_REPO}/actions/caches" --paginate \
+            --jq '.actions_caches[] | "\(.id)\t\(.ref)"' \
+            | while IFS=$'\t' read -r id ref; do
+                if ! grep -Fxq "${ref}" "${live}"; then
+                  echo "Deleting cache ${id} for stale ref ${ref}"
+                  gh api -X DELETE "repos/${GH_REPO}/actions/caches/${id}" >/dev/null \
+                    || true
+                fi
+              done

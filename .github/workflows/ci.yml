@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # NOTE: do NOT add `**.jpg` / `**.png` to paths-ignore — the smoke test
+    # classifies the baked-in images/unknown.jpg fixture, and changes to the
+    # fixture must retrigger CI so the assertion is re-evaluated.
     paths-ignore:
       - '*.md'
       - '!CLAUDE.md'
@@ -14,8 +17,6 @@ on:
       - '.claudeignore'
       - '.claude/**'
       - 'benchmarks/**'
-      - '**.png'
-      - '**.jpg'
       - '**.gif'
       - '**.svg'
   pull_request:
@@ -29,8 +30,6 @@ on:
       - '.claudeignore'
       - '.claude/**'
       - 'benchmarks/**'
-      - '**.png'
-      - '**.jpg'
       - '**.gif'
       - '**.svg'
   workflow_call:
@@ -44,7 +43,88 @@ concurrency:
 
 jobs:
 
+  static-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c0043e486fb448a8bb # v6
+        with:
+          go-version: '1.26.2'
+          cache: true
+
+      - name: Lint workflows
+        run: make lint-ci
+
+      - name: Secret scan
+        run: make secrets
+
+      - name: Trivy filesystem scan
+        run: make trivy-fs
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c0043e486fb448a8bb # v6
+        with:
+          go-version: '1.26.2'
+          cache: true
+
+      # Runs `make test` scoped to pure-Go packages (internal/entity) —
+      # the internal/usecases package transitively imports go-face (dlib
+      # C bindings) and cannot compile on a host without the C toolchain.
+      # Full internal/... with CGO runs inside the builder image as part
+      # of the docker job's GATE 1 (build-for-scan).
+      - name: Unit tests
+        run: make test
+
+  integration-test:
+    needs: [static-check, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read    # pull upstream go-face/dlib20 builder from GHCR
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Lowercase repository owner
+        shell: bash
+        env:
+          OWNER: '${{ github.repository_owner }}'
+        run: |
+          echo "OWNER_LC=$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_ENV}"
+
+      # `make integration-test` pulls the BUILDER_IMAGE (public GHCR
+      # package) and runs go test -tags integration -race inside it.
+      - name: Integration test
+        run: make integration-test
+
+  e2e-compose:
+    needs: [static-check, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: E2E through docker-compose
+        run: make e2e-compose
+
   docker:
+    needs: [static-check, test]
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -88,7 +168,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
-      - name: Convert owner to lower case
+      - name: Lowercase repository owner
         shell: bash
         env:
           OWNER: '${{ github.repository_owner }}'
@@ -177,6 +257,29 @@ jobs:
         run: docker rm -f smoke-test-dlib${{ matrix.dlib_major }} 2>/dev/null || true
 
       # ----------------------------------------------------------------
+      # GATE 3b: container-structure-test (every push).
+      # Asserts runtime contract: entrypoint shape, labels, non-root
+      # UID 10001, binary permissions, required /app subtree present,
+      # statically-linked ELF. Catches rebase / upstream builder drift
+      # that a vulnerability scan would miss.
+      # ----------------------------------------------------------------
+      - name: Install container-structure-test
+        env:
+          CST_VERSION: 'v1.22.1'
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/cst \
+            "https://storage.googleapis.com/container-structure-test/${CST_VERSION}/container-structure-test-linux-amd64"
+          install -m 755 /tmp/cst /usr/local/bin/container-structure-test
+          container-structure-test version
+
+      - name: Container structure test
+        run: |
+          container-structure-test test \
+            --image go-face-recognition:scan-dlib${{ matrix.dlib_major }} \
+            --config container-structure-test.yaml
+
+      # ----------------------------------------------------------------
       # GATE 4: Multi-arch build. ALWAYS runs (catches arm64/arm/v7
       # cross-compile regressions on the commit that introduced them).
       # Push is conditional: validation-only on non-tag pushes, actual
@@ -200,6 +303,9 @@ jobs:
           build-args: |
             BUILDER_IMAGE=${{ matrix.builder }}
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          # Pattern A (default): no in-manifest provenance/SBOM, so the
+          # GHCR "OS / Arch" tab renders cleanly. Supply-chain verification
+          # is covered by the cosign keyless OIDC signature at GATE 5.
           provenance: false
           sbom: false
           tags: ${{ steps.meta.outputs.tags }}
@@ -229,6 +335,48 @@ jobs:
             [ -z "$tag" ] && continue
             echo "→ cosign sign ${tag}@${DIGEST}"
             cosign sign --yes "${tag}@${DIGEST}"
+          done <<< "${TAGS}"
+
+      # ----------------------------------------------------------------
+      # GATE 6: SBOM attestation — tag-only, out-of-band.
+      # Generates a SPDX SBOM via Syft and attaches it to the image
+      # digest as a Sigstore `cosign attest` attestation. Does NOT
+      # embed the SBOM in the image manifest (which would break the
+      # GHCR "OS / Arch" tab rendering — see Pattern A comment above
+      # the Build and push step). Consumers verify with:
+      #   cosign verify-attestation \
+      #     --type spdxjson \
+      #     --certificate-identity-regexp \
+      #       'https://github\.com/AndriyKalashnykov/go-face-recognition/.+' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     ghcr.io/.../go-face-recognition@<digest>
+      # ----------------------------------------------------------------
+      - name: Install Syft
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Generate and attest SBOM
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Use the first tag as the image reference for syft — syft
+          # only needs to pull the manifest; cosign attaches the
+          # attestation to the digest (same digest for every tag).
+          first_tag=$(echo "${TAGS}" | head -1)
+          echo "→ syft ${first_tag}@${DIGEST} → /tmp/sbom.spdx.json"
+          syft "${first_tag}@${DIGEST}" -o spdx-json > /tmp/sbom.spdx.json
+          echo "SBOM byte size: $(stat -c '%s' /tmp/sbom.spdx.json)"
+
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "→ cosign attest ${tag}@${DIGEST} (SPDX SBOM)"
+            cosign attest --yes \
+              --predicate /tmp/sbom.spdx.json \
+              --type spdxjson \
+              "${tag}@${DIGEST}"
           done <<< "${TAGS}"
 
   # ==================================================================
@@ -276,7 +424,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Convert owner to lower case
+      - name: Lowercase repository owner
         shell: bash
         env:
           OWNER: '${{ github.repository_owner }}'
@@ -286,7 +434,7 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
 
-      - name: Log in to GHCR (pull)
+      - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ghcr.io
@@ -445,7 +593,7 @@ jobs:
           merge-multiple: true
           path: artifacts
 
-      - name: Generate checksums.txt
+      - name: Generate checksums
         working-directory: artifacts
         run: |
           set -euo pipefail
@@ -460,7 +608,7 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
 
-      - name: Sign checksums with cosign (keyless OIDC)
+      - name: Sign checksums with cosign
         working-directory: artifacts
         run: |
           set -euo pipefail
@@ -535,3 +683,28 @@ jobs:
           echo "=== release assets uploaded to ${TAG} ==="
           gh release view "${TAG}" --repo "${{ github.repository }}" \
             --json assets --jq '.assets[] | "\(.name) (\(.size) bytes)"'
+
+  # ==================================================================
+  # ci-pass — single aggregator gate for branch protection.
+  # Branch protection references THIS job only. It passes iff every
+  # upstream job succeeded (or was skipped by its own `if:`). Adding a
+  # new upstream job requires adding it to `needs:` below — there is no
+  # drift risk from renaming matrix cells (they don't appear here).
+  # ==================================================================
+  ci-pass:
+    if: always()
+    needs: [static-check, test, integration-test, e2e-compose, docker, release-artifacts-extract, release-artifacts-publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify no upstream job failed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          set -euo pipefail
+          echo "Upstream job results: ${RESULTS}"
+          if echo "${RESULTS}" | grep -Eq '"(failure|cancelled)"'; then
+            echo "ERROR: at least one upstream job failed or was cancelled"
+            exit 1
+          fi
+          echo "All upstream jobs passed (or were legitimately skipped)."

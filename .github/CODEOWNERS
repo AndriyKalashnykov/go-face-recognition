@@ -1,0 +1,16 @@
+# Narrow defense-in-depth: owner review only on paths Renovate does NOT
+# touch. Workflow YAML, Dockerfile.* FROM/digest pins, and renovate.json
+# are ALL omitted so Renovate fallback PRs (on CI failure or merge
+# conflict) never need manual approval — the happy path uses
+# automergeType: "branch" with no PR, but the fallback path can open one.
+#
+# Re-broaden the moment any bot workflow (Claude, auto-fix, codegen) is
+# added to the repo — at that point the threat model shifts from
+# "trusted Renovate only" to "bots with write access".
+
+.github/CODEOWNERS                       @AndriyKalashnykov
+.github/actions/**                       @AndriyKalashnykov
+.dockerignore                            @AndriyKalashnykov
+container-structure-test.yaml            @AndriyKalashnykov
+docker-compose.yml                       @AndriyKalashnykov
+docs/diagrams/**                         @AndriyKalashnykov

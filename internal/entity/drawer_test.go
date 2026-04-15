@@ -96,3 +96,72 @@ func TestDrawer_SaveImage_InvalidPath(t *testing.T) {
 		t.Errorf("expected error saving to non-existent directory, got nil")
 	}
 }
+
+// TestDrawer_loadImage_Errors and TestDrawer_loadFont_Errors exercise the
+// internal loaders directly — `NewDrawer` itself swallows their errors and
+// returns a partially-initialized Drawer, so these table-driven tests
+// guard against regressions in the error-return surface that `NewDrawer`
+// relies on.
+func TestDrawer_loadImage_Errors(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	notJPEG := filepath.Join(tmp, "not.jpg")
+	if err := os.WriteFile(notJPEG, []byte("this is not a jpeg"), 0o600); err != nil {
+		t.Fatalf("seed non-jpeg: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"missing file", filepath.Join(tmp, "does-not-exist.jpg")},
+		{"non-jpeg bytes", notJPEG},
+		{"empty string", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := &DrawerImpl{}
+			if err := d.loadImage(tc.path); err == nil {
+				t.Errorf("loadImage(%q): expected error, got nil", tc.path)
+			}
+			if d.img != nil {
+				t.Errorf("loadImage(%q): d.img should remain nil on error", tc.path)
+			}
+		})
+	}
+}
+
+func TestDrawer_loadFont_Errors(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	notTTF := filepath.Join(tmp, "not.ttf")
+	if err := os.WriteFile(notTTF, []byte("not a real ttf"), 0o600); err != nil {
+		t.Fatalf("seed non-ttf: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"missing file", filepath.Join(tmp, "does-not-exist.ttf")},
+		{"non-ttf bytes", notTTF},
+		{"empty string", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := &DrawerImpl{}
+			if err := d.loadFont(tc.path); err == nil {
+				t.Errorf("loadFont(%q): expected error, got nil", tc.path)
+			}
+			if d.font != nil {
+				t.Errorf("loadFont(%q): d.font should remain nil on error", tc.path)
+			}
+		})
+	}
+}
