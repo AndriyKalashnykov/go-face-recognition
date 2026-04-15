@@ -269,7 +269,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/cst \
-            "https://storage.googleapis.com/container-structure-test/${CST_VERSION}/container-structure-test-linux-amd64"
+            "https://github.com/GoogleContainerTools/container-structure-test/releases/download/${CST_VERSION}/container-structure-test-linux-amd64"
           install -m 755 /tmp/cst /usr/local/bin/container-structure-test
           container-structure-test version
 
