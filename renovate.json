@@ -8,6 +8,7 @@
     "gomod",
     "github-actions",
     "dockerfile",
+    "mise",
     "custom.regex"
   ],
   "postUpdateOptions": [
@@ -23,7 +24,7 @@
   "prHourlyLimit": 0,
   "platformAutomerge": true,
   "automerge": true,
-  "automergeType": "branch",
+  "automergeType": "pr",
   "automergeStrategy": "squash",
   "ignoreTests": false,
   "vulnerabilityAlerts": {
@@ -40,6 +41,14 @@
       "managerFilePatterns": ["/^Makefile$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)( versioning=(?<versioning>[^\\s]+))?\\n[A-Z_]+\\s*[:?]=\\s*(?<currentValue>[^\\s]+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Update workflow-YAML env-var pins via inline renovate comments (e.g. CST_VERSION in ci.yml)",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)( versioning=(?<versioning>[^\\s]+))?( extractVersion=(?<extractVersion>[^\\s]+))?\\n\\s+[A-Z_]+:\\s*'?(?<currentValue>[^'\\s]+)'?"
       ]
     },
     {
@@ -117,6 +126,13 @@
         "Makefile"
       ],
       "groupName": "Makefile tool versions"
+    },
+    {
+      "description": "Group mise tool version bumps (.mise.toml) into one PR — single source of truth for hadolint/golangci-lint/actionlint/shellcheck/gitleaks/trivy/govulncheck/act and Go/Node toolchains",
+      "matchManagers": [
+        "mise"
+      ],
+      "groupName": "mise tool versions"
     },
     {
       "description": "Group go-face builder image bumps (dlib19/dlib20) into one PR so both matrix lineages update together",

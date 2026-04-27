@@ -1,3 +1,27 @@
+# mise tool pins (single source of truth — local dev + CI both consume this)
+#
+# Renovate has first-class `mise` manager support, so each pin below is
+# tracked automatically without per-tool customManager regexes. The inline
+# `# renovate:` comments are documentation; mise's manager handles the
+# actual lookup via the backend's native datasource.
+#
+# go is also declared in go.mod (`go X.Y.Z` directive); the value here MUST
+# match. node is also tracked in .nvmrc (mise reads .nvmrc natively too).
 [tools]
+# Languages — versions match go.mod and .nvmrc respectively.
 go = "1.26.2"
 node = "24"
+
+# Linters & quality gates
+"aqua:hadolint/hadolint"        = "2.14.0"
+"aqua:golangci/golangci-lint"   = "2.11.4"
+"aqua:rhysd/actionlint"         = "1.7.12"
+"aqua:koalaman/shellcheck"      = "0.11.0"
+
+# Security scanners
+"aqua:gitleaks/gitleaks"        = "8.30.1"
+"aqua:aquasecurity/trivy"       = "0.69.3"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.2.0"
+
+# Local-CI runner
+"aqua:nektos/act"               = "0.2.87"

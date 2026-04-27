@@ -31,7 +31,8 @@ docker-compose.yml  # Docker Compose for local multi-container setup
 
 ```bash
 make help             # List available targets
-make deps             # Verify required tool dependencies
+make deps             # Install all tools pinned in .mise.toml (auto-bootstraps mise locally)
+make deps-check       # Show installed mise tools (diagnostic)
 make build            # Build Go binary for Linux amd64
 make build-arm64      # Build Go binary for macOS arm64
 make test             # Host unit tests (scoped to internal/entity — pure Go, no CGO)
@@ -51,7 +52,8 @@ make secrets          # Scan for hardcoded secrets with gitleaks
 make trivy-fs         # Filesystem vulnerability / secret / misconfig scan (Trivy)
 make vulncheck        # Go dependency vulnerability scan on host (requires C toolchain)
 make vulncheck-docker # Go dependency vulnerability scan inside the builder image (no host C deps)
-make static-check     # Composite gate (lint-ci, lint, secrets, trivy-fs, mermaid-lint, deps-prune-check)
+make static-check-host # Host-runnable composite gate (lint-ci, secrets, trivy-fs, mermaid-lint, diagrams-check, deps-prune-check) — used by CI
+make static-check     # Full composite gate = static-check-host + lint (requires CGO/dlib)
 make coverage-check   # Fail if total unit-test coverage falls below 80%
 make run              # Run the application locally
 make update           # Update Go dependencies + run make ci
@@ -88,36 +90,54 @@ Docker build + link + run, and dry-runs skip exactly that.
 
 ## Key Variables
 
+**Tool versions are pinned in `.mise.toml`** (single source of truth). `make deps` runs `mise install` which provisions Go, Node, and every aqua-backed tool the project needs (`hadolint`, `golangci-lint`, `actionlint`, `shellcheck`, `gitleaks`, `trivy`, `govulncheck`, `act`). Renovate's first-class `mise` manager updates `.mise.toml` automatically. There are no per-tool `_VERSION` constants in the Makefile for mise-managed tools.
+
+The Makefile constants below are the EXCEPTIONS — Docker images consumed via `docker run`, host-side multiarch helpers, and project-specific image references. These are tracked by the generic Makefile customManager regex in `renovate.json` via inline `# renovate:` comments.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GO_VER` | `1.26.2` | Go version for Docker builds |
-| `GOLANGCI_VERSION` | `2.11.4` | golangci-lint version |
-| `ACT_VERSION` | `0.2.87` | act version for local CI |
-| `HADOLINT_VERSION` | `2.14.0` | hadolint version for Dockerfile linting |
-| `ACTIONLINT_VERSION` | `1.7.12` | actionlint version for workflow linting |
-| `SHELLCHECK_VERSION` | `0.11.0` | shellcheck version (used by actionlint) |
-| `GITLEAKS_VERSION` | `8.30.1` | gitleaks version for secret scanning |
-| `TRIVY_VERSION` | `0.69.3` | Trivy version for security scanning |
-| `GOVULNCHECK_VERSION` | `1.2.0` | govulncheck version for Go CVE scanning |
-| `MERMAID_CLI_VERSION` | `11.12.0` | minlag/mermaid-cli image tag used by `make mermaid-lint` |
-| `PLANTUML_VERSION` | `1.2026.2` | plantuml/plantuml image tag used by `make diagrams` |
-| `CONTAINER_STRUCTURE_TEST_VERSION` | `1.22.1` | container-structure-test CLI version used by the docker CI job |
+| `GO_VER` | `$(shell awk '/^go [0-9]/ ...' go.mod)` → `1.26.2` | Go version for Docker builds — derived from `go.mod` so it stays in lockstep with `.mise.toml` and the Renovate-managed `gomod` manager (no separate Renovate pin needed) |
 | `NODE_VERSION` | `$(shell cat .nvmrc)` → `24` | Node major version (source of truth: `.nvmrc`; also declared in `.mise.toml`) |
+| `MERMAID_CLI_VERSION` | `11.12.0` | `minlag/mermaid-cli` image tag used by `make mermaid-lint` (Docker image — not in mise registry) |
+| `PLANTUML_VERSION` | `1.2026.2` | `plantuml/plantuml` image tag used by `make diagrams` (Docker image — not in mise registry) |
+| `BINFMT_VERSION` | `qemu-v10.2.1` | `tonistiigi/binfmt` image tag used by `make image-setup-multiarch` (Docker image — not in mise registry) |
 | `DOCKER_PLATFORM` | `linux/amd64` | Default Docker build platform |
 | `BUILDER_IMAGE` | `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4` (Makefile default) | Base builder image override passed to `Dockerfile.go-face` as `--build-arg`. CI builds both `dlib19` and `dlib20` lineages via a matrix (see CI/CD). |
 | `IMAGE_REPO` | `andriykalashnykov/go-face-recognition` | Docker image repository |
+
+Tools managed by mise (versions in `.mise.toml`):
+
+| Tool | Backend | Version source |
+|------|---------|----------------|
+| Go | core (mise reads `go.mod`) | `.mise.toml` `go = ...` matches `go.mod` |
+| Node | core (mise reads `.nvmrc`) | `.mise.toml` `node = ...` |
+| hadolint | `aqua:hadolint/hadolint` | `.mise.toml` |
+| golangci-lint | `aqua:golangci/golangci-lint` | `.mise.toml` |
+| actionlint | `aqua:rhysd/actionlint` | `.mise.toml` |
+| shellcheck | `aqua:koalaman/shellcheck` | `.mise.toml` |
+| gitleaks | `aqua:gitleaks/gitleaks` | `.mise.toml` |
+| trivy | `aqua:aquasecurity/trivy` | `.mise.toml` |
+| govulncheck | `go:golang.org/x/vuln/cmd/govulncheck` | `.mise.toml` |
+| act | `aqua:nektos/act` | `.mise.toml` |
+
+The CI workflow uses `jdx/mise-action` to install everything from `.mise.toml` in a single step — no per-tool `actions/setup-*` actions, no inline tool installations.
 
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to main, tags, and pull requests:
 
-1. **static-check** job: runs `make lint-ci secrets trivy-fs` on host (pieces that do not require CGo/dlib).
-2. **test** job: runs `make test` on host (pure-Go `internal/entity` suite, 98%+ coverage).
-3. **integration-test** job: runs `make integration-test` (pulls the public `go-face/dlib20` builder image and executes `//go:build integration` tests with `-race`).
-4. **e2e-compose** job: runs `make e2e-compose` — exercises `docker-compose.yml` (Dockerfile.dlib-docker-go build path) and asserts face count + identity. Catches compose drift that `docker` job (Dockerfile.go-face) cannot see.
-5. **docker** job: Build multi-arch Docker image (amd64, arm64, arm/v7); push to GHCR on tags only. Authenticates with the built-in `GITHUB_TOKEN` (no PAT required). Runs as a `strategy.matrix` over every supported `dlib-docker` major lineage that upstream `go-face` publishes (currently `dlib19` and `dlib20`); each cell reruns all seven hardening gates (build-for-scan → Trivy image scan → smoke test → container-structure-test → multi-arch build/push → cosign sign → SBOM attest via syft + `cosign attest --type spdxjson`) independently with its own GHA cache scope and its own scan/smoke container names. `fail-fast: false` so a regression in one lineage does not mask the other. Gated on `needs: [static-check, test]`.
-6. **release-artifacts-extract + release-artifacts-publish** jobs (tag-gated): split into two jobs by design — `extract` is a per-lineage matrix that pulls each platform manifest and builds tarballs; `publish` aggregates them, generates checksums.txt, cosign-blob-signs, and uploads to the GitHub Release. This two-job split deviates from the canonical single-`docker` job convention and is documented here as an accepted exception: the matrix fan-out is required for multi-lineage × multi-arch tarball extraction and cannot live inside the single `docker` matrix cell without serializing the work.
-7. **ci-pass** aggregator: `if: always()` with `needs:` enumerating every upstream job; branch protection references this job only, so matrix-cell renames don't silently bypass protection.
+1. **changes** job: cheap (~10 s) `dorny/paths-filter` detector that emits TWO outputs:
+   - `code=true` for any non-docs change (re-includes `CLAUDE.md` because it's project config, not docs). Drives the cheap host jobs (`static-check`, `test`).
+   - `image=true` for changes that could affect the produced image or its runtime contract — Dockerfiles, docker-compose.yml, container-structure-test.yaml, Makefile, go.mod/sum, cmd/**, internal/**, baked-in data (models/, persons/, fonts/, images/), and ci.yml itself (matrix builder pins). Drives the EXPENSIVE jobs (`docker`, `integration-test`, `e2e`).
+
+   Every heavy job gates on `code AND (image OR is-tag)` so non-image-affecting code changes (CODEOWNERS, renovate.json, cleanup-runs.yml, .mise.toml) skip the heavy jobs while tag pushes always run them as a release-day gate. Replaces the legacy trigger-level `paths-ignore` pattern, which deadlocks under Repository Rulesets (a docs-only PR's workflow run is never created → required `ci-pass` check never reports → merge blocked, admin override rejected). NOTE: `**.png` / `**.jpg` are deliberately NOT in the doc-only filter — fixture image edits must retrigger CI so the smoke test re-evaluates `images/unknown.jpg`.
+2. **static-check** job: runs `make static-check-host` on host as a single composite step (lint-ci + secrets + trivy-fs + mermaid-lint + diagrams-check + deps-prune-check). The CGO-requiring `lint` (golangci-lint with gosec on internal/usecases) is exercised inside the docker job's GATE 1 build-for-scan because it cannot run on a stock runner.
+3. **test** job: runs `make test` on host (pure-Go `internal/entity` suite, 98%+ coverage). Gated on `needs: [static-check]` for fail-fast.
+4. **integration-test** job: runs `make integration-test` (pulls the public `go-face/dlib20` builder image and executes `//go:build integration` tests with `-race`). Gated on `needs: [static-check, test]` AND on the `image` change-flag (or tag push).
+5. **e2e** job: runs `make e2e-compose` — exercises `docker-compose.yml` (Dockerfile.dlib-docker-go build path) and asserts face count + identity. Catches compose drift that `docker` job (Dockerfile.go-face) cannot see. Job key is `e2e` per portfolio convention; the Makefile target name reflects the path it exercises (the other `make e2e` target — Dockerfile.go-face direct — is exercised inside the docker job's GATE 3 smoke test). Gated on `needs: [static-check, test]` AND on the `image` change-flag (or tag push).
+6. **docker** job: Build Docker image; push to GHCR on tags only. Authenticates with the built-in `GITHUB_TOKEN` (no PAT required). Runs as a `strategy.matrix` over every supported `dlib-docker` major lineage that upstream `go-face` publishes (currently `dlib19` and `dlib20`); each cell reruns all seven hardening gates (build-for-scan → Trivy image scan → smoke test → container-structure-test → multi-arch build/push → cosign sign → SBOM attest via syft + `cosign attest --type spdxjson`) independently with its own GHA cache scope and its own scan/smoke container names. `fail-fast: false` so a regression in one lineage does not mask the other. **Cost optimization**: GATE 4 (`Build and push`) is `linux/amd64` only on non-tag pushes (validation only) and full multi-arch (`amd64,arm64,arm/v7`) on tag pushes (the only time we publish). arm64 + arm/v7 builds run dlib's C++ template-heavy compile under QEMU at ~5–8× native wall-clock, so this saves ~80–90% of docker-job time on routine PRs while still validating cross-arch on release day. Gated on `needs: [static-check, test]` AND on the `image` change-flag (or tag push).
+7. **release-artifacts-extract + release-artifacts-publish** jobs (tag-gated): split into two jobs by design — `extract` is a per-lineage matrix that pulls each platform manifest and builds tarballs; `publish` aggregates them, generates checksums.txt, cosign-blob-signs, and uploads to the GitHub Release. This two-job split deviates from the canonical single-`docker` job convention and is documented here as an accepted exception: the matrix fan-out is required for multi-lineage × multi-arch tarball extraction and cannot live inside the single `docker` matrix cell without serializing the work.
+8. **ci-pass** aggregator: `if: always()` with `needs:` enumerating every upstream job (including `changes`); branch protection references this job only, so matrix-cell renames don't silently bypass protection. `skipped` results count as success — required for the `changes`-detector pattern to clear the Ruleset gate on docs-only PRs.
 
 Build and test happen inside the Docker multi-stage build since CGO/dlib dependencies are only available in the builder image. Lint and test via `make ci` are for local development.
 
@@ -135,10 +155,26 @@ A separate cleanup workflow (`.github/workflows/cleanup-runs.yml`) removes old w
   - **Secondary**: `ghcr.io/andriykalashnykov/go-face/dlib19` (CI `*-dlib19` tags only; override locally with `make image-build BUILDER_IMAGE=ghcr.io/andriykalashnykov/go-face/dlib19:<tag>`)
   - Exact digests are pinned in `.github/workflows/ci.yml` under the `strategy.matrix.include[].builder` keys and tracked by Renovate via a custom regex manager.
 - `make static-check` excludes `vulncheck` because govulncheck needs the full CGO toolchain to load packages; the standalone `make vulncheck` target is available for manual invocation when the C deps are installed (or inside the builder image).
+- `make static-check-host` is the CI-runnable subset of `make static-check`: lint-ci + secrets + trivy-fs + mermaid-lint + diagrams-check + deps-prune-check (everything except the CGO-requiring `lint`). The CI `static-check` job calls this target as a single composite step. Use `make static-check` locally on hosts with the C toolchain installed; use `make static-check-host` (or rely on CI) on stock runners.
 
 ## Upgrade Backlog
 
-Last reviewed: 2026-04-14
+Last reviewed: 2026-04-26
+
+- [x] ~~Migrate trigger-level `paths-ignore` → `dorny/paths-filter` `changes` detector job (Rulesets-deadlock fix)~~ (done 2026-04-26 — repo is on Repository Rulesets requiring `ci-pass`; trigger-level `paths-ignore` would deadlock docs-only PRs because no run is created → required check never reports → merge blocked, admin override rejected. Migrated to a 10s `changes` job using `dorny/paths-filter@v3` with the canonical negated glob (re-includes `CLAUDE.md`); every heavy job gates on `if: needs.changes.outputs.code == 'true'`. Added `pull-requests: read` workflow permission for the action's listFiles API call. `**.png` / `**.jpg` deliberately omitted from the doc-only filter so fixture image edits retrigger the smoke test)
+- [x] ~~Wire `test` job to `needs: [static-check]` for fail-fast~~ (done 2026-04-26 — was running in parallel with `static-check`)
+- [x] ~~Consolidate `static-check` job to one composite Makefile call~~ (done 2026-04-26 — split Makefile `static-check` into `static-check-host` (host-safe subset: lint-ci + secrets + trivy-fs + mermaid-lint + diagrams-check + deps-prune-check) and `static-check` (full = host-safe + lint). CI calls `make static-check-host` as one step. Adds mermaid-lint, diagrams-check, deps-prune-check coverage to CI for the first time — the prior 3-step inline workflow was missing them)
+- [x] ~~Add `name:` to every `uses:` step lacking one~~ (done 2026-04-26 — `Checkout`, `Set up QEMU`, `Set up Docker Buildx`. CI logs were rendering `Run actions/checkout@de0fac2e4500dabe...` instead of `Checkout`)
+- [x] ~~Switch `actions/setup-go` from hardcoded `go-version: '1.26.2'` to `go-version-file: 'go.mod'`~~ (done 2026-04-26 — single source of truth, eliminates drift from `GO_VER` in Makefile)
+- [x] ~~Add Go tool binary cache (`~/go/bin` + `~/.local/bin` keyed on `hashFiles('Makefile')`)~~ (done 2026-04-26 — caches golangci-lint, hadolint, gitleaks, actionlint, shellcheck, trivy, govulncheck across runs; tool version bump in Makefile invalidates cache automatically)
+- [x] ~~Drop `type=ref,event=branch` from Docker metadata-action tags~~ (done 2026-04-26 — generated a dead `:main` tag that was never pushed (push: gated on tag refs); pure noise)
+- [x] ~~Rename CI job `e2e-compose` → `e2e`~~ (done 2026-04-26 — portfolio convention is the singular lowercase `e2e` job key. Underlying Makefile target `make e2e-compose` keeps its name to reflect the path it exercises)
+- [x] ~~Add `Set up Go` step to `integration-test` + `e2e` jobs~~ (done 2026-04-26 — both jobs call `make <target>` whose `deps:` prerequisite runs `command -v go`. Real ubuntu-latest runners have Go preinstalled so this never failed in real CI; act's `catthehacker/ubuntu:act-latest` doesn't, so `make ci-run` failed with "ERROR: go is not installed" before any Docker work. Cheap (~2 s with cache) on real CI; closes the act-parity gap)
+- [x] ~~Cost optimization (A): build amd64-only on non-tag pushes; multi-arch only on tags~~ (done 2026-04-26 — `Build and push` step's `platforms:` is now `${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64,linux/arm/v7' \|\| 'linux/amd64' }}`. arm64 + arm/v7 builds run dlib's C++ template-heavy compile under QEMU emulation, ~5–8× wall-clock vs native — the dominant CI cost on every PR. Cross-arch regressions still surface on tag day. Trade-off documented in the `Build and push` step comment in `ci.yml`)
+- [x] ~~Cost optimization (C): per-flag scoping for the `changes` detector~~ (done 2026-04-26 — added `image:` filter to the `changes` job covering Dockerfiles, docker-compose.yml, container-structure-test.yaml, Makefile, go.mod/sum, cmd/**, internal/**, models/**, persons/**, fonts/**, images/**, .github/workflows/ci.yml. The `docker`, `integration-test`, and `e2e` jobs now gate on `code AND (image OR is-tag)`. Code-only-but-not-image-affecting changes (CODEOWNERS, renovate.json, cleanup-runs.yml, .mise.toml, .nvmrc) skip the heavy jobs entirely. Tag pushes always run them as a release-day gate)
+- [x] ~~Migrate Makefile tool pins to `.mise.toml` (mise as single source of truth)~~ (done 2026-04-26 — moved `ACT_VERSION`, `HADOLINT_VERSION`, `GOLANGCI_VERSION`, `ACTIONLINT_VERSION`, `SHELLCHECK_VERSION`, `GITLEAKS_VERSION`, `TRIVY_VERSION`, `GOVULNCHECK_VERSION` from Makefile constants to `.mise.toml` aqua/go backends. Dropped 7 `deps-<tool>` install targets (~80 lines of curl-and-install boilerplate). `make deps` now runs `mise install` against `.mise.toml`. CI uses `jdx/mise-action@v4` instead of `actions/setup-go`. Renovate's first-class `mise` manager updates `.mise.toml` automatically. Also: derived `GO_VER` from `go.mod` (was duplicate-pinned); deleted dead `CONTAINER_STRUCTURE_TEST_VERSION` constant (CI workflow has its own pin); pinned `tonistiigi/binfmt:qemu-v10.2.1` in `image-setup-multiarch` (was unpinned `:latest` defaulted))
+
+Last reviewed prior: 2026-04-14
 
 - [x] ~~Migrate `renovate-bootstrap` from nvm → mise (portfolio-wide policy)~~ (done 2026-04-14 — `.mise.toml` declares `go = "1.26.2"` and `node = "24"`; `renovate-bootstrap` installs mise via `https://mise.run` and provisions Node via `mise install node@$(NODE_VERSION)`. Dropped `NVM_VERSION` constant and its Renovate comment. `.nvmrc` retained since mise reads it natively and a handful of IDE integrations still consume it)
 - [x] ~~Bump `GOVULNCHECK_VERSION` 1.1.4 → 1.2.0~~ (done 2026-04-14)
@@ -159,8 +195,7 @@ Last reviewed: 2026-04-14
 - [ ] **Renovate coverage audit for the new Makefile pins** (`MERMAID_CLI_VERSION`, `CONTAINER_STRUCTURE_TEST_VERSION`). Both are annotated with `# renovate:` comments that should match the generic customManagers regex, but the 3-minor day-1 drift on CST hints the regex may not be catching them. Verify by running `renovate-config-validator` + triggering a dry-run Renovate scan and confirming both constants appear in the extracted dependency list.
 - [ ] **`container-structure-test` 1.20→1.22 changelog scan** — now on 1.22.1, but the version jump skipped 3 minor releases. Scan the changelogs (https://github.com/GoogleContainerTools/container-structure-test/releases) for schema features worth exercising in `container-structure-test.yaml` (candidate: metadata assertions, OCI layer checks, label regex matching).
 - [ ] **`anchore/sbom-action` v0.17→v0.24 smoke test on next tag push** — Syft v1.x migration happened inside this version range; confirm `syft "${first_tag}@${DIGEST}" -o spdx-json` still produces a valid SPDX 2.x JSON that `cosign attest --type spdxjson` accepts. Catch this in the next throwaway RC tag, not v1.x.
-- [ ] **Trivy-gate the upstream builder pull in `integration-test` / `e2e-compose` jobs** — both jobs pull `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@<digest>` on every push and trust it via SHA pin only. Adding `aquasecurity/trivy-action` with `image-ref: ${{ env.BUILDER_IMAGE }}` as a first step would catch a compromised upstream lineage. Low urgency because the pin is digest-immutable — but zero-cost insurance against a theoretical upstream tag rewrite.
-- [ ] **Gate `integration-test` + `e2e-compose` CI jobs on `paths:` filter** — both pull a ~1.5–2 GB builder image on every push (est. +30–90s per PR cold pull). Scope them to fire only when `internal/**`, `Dockerfile.go-face`, `Dockerfile.dlib-docker-go`, `docker-compose.yml`, `go.mod`, or `go.sum` changes. Alternatively add `actions/cache` keyed on the builder image digest to amortize the pull across the two jobs.
+- [ ] **Trivy-gate the upstream builder pull in `integration-test` / `e2e` jobs** — both jobs pull `ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4@<digest>` on every push and trust it via SHA pin only. Adding `aquasecurity/trivy-action` with `image-ref: ${{ env.BUILDER_IMAGE }}` as a first step would catch a compromised upstream lineage. Low urgency because the pin is digest-immutable — but zero-cost insurance against a theoretical upstream tag rewrite.
 - [ ] **Discovery workflow scope clarification** — `.github/workflows/discover-go-face-lineages.yml` discovers new `dlib<N>` majors but does NOT detect new patch/minor tags within existing lineages (that's Renovate's `go-face builder images` group). Add a 1-line comment to the workflow clarifying this so future readers don't assume it covers both dimensions. Also confirm the Renovate group is still cycling — last merge was 0.1.4 on 2026-04-11.
 - [ ] **Consider `npx @mermaid-js/mermaid-cli` (via mise) instead of `minlag/mermaid-cli` Docker image** — current `make mermaid-lint` pulls a single-maintainer Docker image. Switching to the npm package pinned via `.mise.toml` aligns with portfolio mise-first policy and drops one supply-chain hop. Monitor, not urgent — image is maintained, but dependency diversity matters for CI-critical tools.
 - [x] ~~Add PlantUML C4 Context + Container diagrams under `docs/diagrams/*.puml` with modern-flat skinparam theme + `make diagrams` / `diagrams-clean` / `diagrams-check` targets wired into `static-check`; render to committed PNGs so README renders on github.com without a toolchain~~ (done 2026-04-14 — pinned `plantuml/plantuml:1.2026.2`, Renovate-annotated; C4-PlantUML stdlib pinned to v2.11.0; teal Person / indigo System / violet System_Ext palette; `UpdateElementStyle` needs BOTH `"system_ext"` AND `"external_system"` tags in Context diagrams for the palette to apply consistently)
