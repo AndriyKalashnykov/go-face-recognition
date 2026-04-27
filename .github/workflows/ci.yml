@@ -4,38 +4,16 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    # NOTE: do NOT add `**.jpg` / `**.png` to paths-ignore — the smoke test
-    # classifies the baked-in images/unknown.jpg fixture, and changes to the
-    # fixture must retrigger CI so the assertion is re-evaluated.
-    paths-ignore:
-      - '*.md'
-      - '!CLAUDE.md'
-      - 'docs/**'
-      - 'specs/**'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.claudeignore'
-      - '.claude/**'
-      - 'benchmarks/**'
-      - '**.gif'
-      - '**.svg'
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - '!CLAUDE.md'
-      - 'docs/**'
-      - 'specs/**'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.claudeignore'
-      - '.claude/**'
-      - 'benchmarks/**'
-      - '**.gif'
-      - '**.svg'
   workflow_call:
 
+# `pull-requests: read` is required for dorny/paths-filter to call the
+# pull-request files API on `pull_request` events. Without it the action
+# fails with `Resource not accessible by integration` and blocks every
+# downstream job that gates on `needs.changes`.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,60 +21,171 @@ concurrency:
 
 jobs:
 
+  # ==================================================================
+  # changes — cheap path-filter detector. Replaces trigger-level
+  # `paths-ignore` (which deadlocks under Repository Rulesets: a
+  # doc-only PR's workflow run is never created → required `ci-pass`
+  # check never reports → merge blocked, admin override rejected).
+  #
+  # Doc-only PRs trigger this job only (~10 s); heavy jobs skip; the
+  # `ci-pass` aggregator treats `skipped` as success and the Ruleset
+  # gate clears.
+  #
+  # NOTE: the smoke test classifies the baked-in images/unknown.jpg
+  # fixture, so changes to fixture images MUST trigger CI. The negated
+  # glob below intentionally omits `**.png` / `**.jpg` so fixture edits
+  # re-evaluate the assertion. `**.gif` / `**.svg` are docs-only.
+  # ==================================================================
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # Two filters:
+      #   `code`  — coarse "is this anything more than a docs change?" gate.
+      #             Drives static-check + test (cheap host jobs).
+      #   `image` — finer gate for the EXPENSIVE jobs (docker matrix builds
+      #             dlib via QEMU; integration-test + e2e pull / build the
+      #             ~1.5–2 GB builder image). Triggers on anything that
+      #             could change the produced binary or its runtime contract:
+      #             Dockerfiles, build / runtime configs, the Makefile
+      #             (BUILDER_IMAGE / GO_VER pins), Go source, pinned data
+      #             (models/, persons/, fonts/, images/ — fixtures the
+      #             smoke test exercises), and ci.yml itself (matrix
+      #             builder pins live here).
+      #
+      # The docker / integration-test / e2e jobs gate on
+      #   `code AND (image OR is-tag)`
+      # so a non-image-affecting code change (e.g. CODEOWNERS, renovate.json,
+      # cleanup-runs.yml) skips the heavy jobs. Tag pushes always run them
+      # to validate the release artifact.
+      - name: Detect code-affecting paths
+        id: filter
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        with:
+          filters: |
+            code:
+              - '!(**.md|docs/**|specs/**|LICENSE|.gitignore|.claudeignore|.claude/**|benchmarks/**|**.gif|**.svg)'
+              - 'CLAUDE.md'
+            image:
+              - 'Dockerfile.*'
+              - 'docker-compose.yml'
+              - 'container-structure-test.yaml'
+              - 'Makefile'
+              - 'go.mod'
+              - 'go.sum'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'models/**'
+              - 'persons/**'
+              - 'fonts/**'
+              - 'images/**'
+              - '.github/workflows/ci.yml'
+
   static-check:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      # Single source of truth for tool versions is .mise.toml. mise-action
+      # installs Go (per .mise.toml `go = "..."` matching go.mod), Node, and
+      # every aqua-backed tool the project needs (hadolint, golangci-lint,
+      # actionlint, shellcheck, gitleaks, trivy, govulncheck, act). `cache:
+      # true` caches the resolved mise installs across runs keyed on the
+      # .mise.toml hash — version bumps invalidate the cache automatically.
+      - name: Set up toolchain (mise)
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          go-version: '1.26.2'
+          install: true
           cache: true
 
-      - name: Lint workflows
-        run: make lint-ci
+      # mise-action does NOT cache the Go module download cache (~/go/pkg/mod)
+      # — that's a package cache, not a tool cache. Cache it separately so
+      # `go mod tidy` (run by deps-prune-check) doesn't re-download the world.
+      - name: Cache Go module download
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
 
-      - name: Secret scan
-        run: make secrets
-
-      - name: Trivy filesystem scan
-        run: make trivy-fs
+      # Composite quality gate (one Makefile target = one CI step). The
+      # `static-check-host` target runs lint-ci + secrets + trivy-fs +
+      # mermaid-lint + diagrams-check + deps-prune-check. The CGO-
+      # requiring `lint` (golangci-lint with gosec on internal/usecases)
+      # is exercised inside the docker job's GATE 1 build-for-scan.
+      - name: Static check
+        run: make static-check-host
 
   test:
+    needs: [changes, static-check]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      - name: Set up toolchain (mise)
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          go-version: '1.26.2'
+          install: true
           cache: true
+
+      - name: Cache Go module download
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
 
       # Runs `make test` scoped to pure-Go packages (internal/entity) —
       # the internal/usecases package transitively imports go-face (dlib
       # C bindings) and cannot compile on a host without the C toolchain.
       # Full internal/... with CGO runs inside the builder image as part
       # of the docker job's GATE 1 (build-for-scan).
-      - name: Unit tests
+      - name: Unit test
         run: make test
 
   integration-test:
-    needs: [static-check, test]
+    needs: [changes, static-check, test]
+    # Skip on code-only-but-not-image-affecting changes (e.g. renovate.json,
+    # CODEOWNERS, cleanup-runs.yml). Always run on tag pushes.
+    if: needs.changes.outputs.code == 'true' && (needs.changes.outputs.image == 'true' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       packages: read    # pull upstream go-face/dlib20 builder from GHCR
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      # Required by `make integration-test` → `deps` prerequisite. mise-action
+      # provisions Go (and every other tool the deps target verifies) from
+      # `.mise.toml`. Real ubuntu-latest runners ship Go preinstalled, but
+      # act's catthehacker/ubuntu:act-latest doesn't — without this step
+      # `make ci-run` fails on a missing `go` binary before any docker work.
+      - name: Set up toolchain (mise)
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          install: true
+          cache: true
 
       - name: Lowercase repository owner
         shell: bash
@@ -110,8 +199,11 @@ jobs:
       - name: Integration test
         run: make integration-test
 
-  e2e-compose:
-    needs: [static-check, test]
+  e2e:
+    needs: [changes, static-check, test]
+    # Skip on code-only-but-not-image-affecting changes (10–14 min cold
+    # docker-compose build is the dominant CI cost). Always run on tag pushes.
+    if: needs.changes.outputs.code == 'true' && (needs.changes.outputs.image == 'true' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     # 30m not 15m: docker-compose.yml builds Dockerfile.dlib-docker-go
     # which recompiles go-face + static-links libdlib.a from scratch. No
@@ -123,13 +215,32 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      # Required by `make e2e-compose` → `deps` prerequisite (see the
+      # equivalent step in the integration-test job for the rationale).
+      - name: Set up toolchain (mise)
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          install: true
+          cache: true
+
+      # Wraps `make e2e-compose` — the canonical e2e suite for this
+      # project. Job key is `e2e` per portfolio convention; the Makefile
+      # target name reflects the path it exercises (docker-compose.yml
+      # → Dockerfile.dlib-docker-go). The other Makefile target
+      # (`make e2e`, Dockerfile.go-face direct) is exercised inside the
+      # docker job's GATE 3 smoke test.
       - name: E2E through docker-compose
         run: make e2e-compose
 
   docker:
-    needs: [static-check, test]
+    needs: [changes, static-check, test]
+    # Skip on code-only-but-not-image-affecting changes. Always run on tag
+    # pushes (release path). On non-tag pushes the build is amd64-only — see
+    # the `platforms:` expression in the Build and push step below.
+    if: needs.changes.outputs.code == 'true' && (needs.changes.outputs.image == 'true' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -165,13 +276,16 @@ jobs:
 
     steps:
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
-      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
 
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       - name: Lowercase repository owner
         shell: bash
@@ -193,7 +307,6 @@ jobs:
             latest=${{ matrix.primary && startsWith(github.ref, 'refs/tags/') }}
             ${{ matrix.suffix && format('suffix={0},onlatest=true', matrix.suffix) || '' }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -257,7 +370,7 @@ jobs:
             --entrypoint /app/main \
             go-face-recognition:scan-dlib${{ matrix.dlib_major }}
 
-      - name: Cleanup smoke container
+      - name: Remove smoke container
         if: always()
         run: docker rm -f smoke-test-dlib${{ matrix.dlib_major }} 2>/dev/null || true
 
@@ -270,6 +383,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Install container-structure-test
         env:
+          # renovate: datasource=github-releases depName=GoogleContainerTools/container-structure-test
           CST_VERSION: 'v1.22.1'
         run: |
           set -euo pipefail
@@ -304,7 +418,14 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.go-face
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          # On tag pushes (the only time we publish): full multi-arch
+          # matrix. On non-tag pushes (validation only): amd64 only —
+          # arm64 + arm/v7 builds run dlib's C++ template-heavy compile
+          # under QEMU emulation (~5–8× wall-clock vs native). Cross-arch
+          # regressions still surface on tag day, but routine PR feedback
+          # stays fast and cheap. dlib's template surface is stable enough
+          # that this trade-off is worth it for a low-volume project.
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64,linux/arm/v7' || 'linux/amd64' }}
           build-args: |
             BUILDER_IMAGE=${{ matrix.builder }}
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -427,7 +548,8 @@ jobs:
           - dlib_major: '19'
             suffix: '-dlib19'
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Lowercase repository owner
         shell: bash
@@ -589,7 +711,8 @@ jobs:
       contents: write   # gh release create + upload
       id-token: write   # cosign keyless OIDC
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download all lineage tarballs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -692,13 +815,15 @@ jobs:
   # ==================================================================
   # ci-pass — single aggregator gate for branch protection.
   # Branch protection references THIS job only. It passes iff every
-  # upstream job succeeded (or was skipped by its own `if:`). Adding a
-  # new upstream job requires adding it to `needs:` below — there is no
-  # drift risk from renaming matrix cells (they don't appear here).
+  # upstream job succeeded (or was skipped by its own `if:` — including
+  # the entire heavy pipeline being skipped by the `changes` detector
+  # on a docs-only PR). Adding a new upstream job requires adding it to
+  # `needs:` below — there is no drift risk from renaming matrix cells
+  # (they don't appear here).
   # ==================================================================
   ci-pass:
     if: always()
-    needs: [static-check, test, integration-test, e2e-compose, docker, release-artifacts-extract, release-artifacts-publish]
+    needs: [changes, static-check, test, integration-test, e2e, docker, release-artifacts-extract, release-artifacts-publish]
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

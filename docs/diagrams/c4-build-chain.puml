@@ -1,0 +1,38 @@
+@startuml c4-build-chain
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/v2.11.0/C4_Deployment.puml
+
+' Modern flat styling: no shadows, sharper corners, clean sans-serif, modern palette.
+skinparam backgroundColor #FAFAFA
+skinparam shadowing false
+skinparam roundCorner 4
+skinparam defaultFontName "Inter, Helvetica, Arial, sans-serif"
+skinparam defaultFontSize 13
+skinparam ArrowColor #37474F
+skinparam ArrowThickness 1.4
+skinparam rectangleBorderThickness 1.3
+skinparam nodesep 24
+skinparam ranksep 36
+
+UpdateElementStyle("container",       $fontColor="#FFFFFF", $bgColor="#2563EB", $borderColor="#1E3A8A")
+UpdateElementStyle("node",            $fontColor="#1E293B", $bgColor="#E2E8F0", $borderColor="#64748B")
+UpdateBoundaryStyle($bgColor="#F1F5F9", $borderColor="#94A3B8", $fontColor="#1E293B")
+
+title Three-repo image-build chain — go-face-recognition
+
+Deployment_Node(dlib, "AndriyKalashnykov/dlib-docker", "ghcr.io — grandparent layer") {
+    Container(dlib_img, "dlib-docker:{19.24.9, 20.0.1}", "Ubuntu noble + cmake/blas/lapack/jpeg + davisking/dlib", "Builds dlib from source twice (BUILD_SHARED_LIBS=ON & OFF) so /usr/local/lib ships BOTH libdlib.so AND libdlib.a. Exports LIBRARY_PATH so downstream `ld -ldlib` resolves the static archive.")
+}
+
+Deployment_Node(goface, "AndriyKalashnykov/go-face", "ghcr.io — parent layer") {
+    Container(goface_img, "go-face/dlib{19,20}:0.1.4", "dlib-docker + Go toolchain (from go.mod) + go-face CGo source tree", "Matrix-built against every active dlib lineage in .dlib-versions.json — one image per major lineage with a suffix.")
+}
+
+Deployment_Node(app, "AndriyKalashnykov/go-face-recognition", "ghcr.io — this repo") {
+    Container(app_img, "go-face-recognition:<tag>{,-dlib19}", "Static Go binary (-extldflags -static + static_build tag) → minimal alpine runtime as non-root UID 10001", "Loads persons/ and images/unknown.jpg, writes images/result.jpg. CI matrix builds + publishes against every go-face dlib lineage.")
+}
+
+Rel_D(dlib_img, goface_img, "FROM (digest-pinned)", "Dockerfile")
+Rel_D(goface_img, app_img,  "FROM (digest-pinned, per CI matrix cell)", "Dockerfile.go-face")
+
+SHOW_LEGEND()
+@enduml

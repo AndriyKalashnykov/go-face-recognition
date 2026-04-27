@@ -38,6 +38,10 @@ ghcr.io/andriykalashnykov/go-face-recognition:<app-version>         ← this rep
 - **Scheduled upstream lineage discovery** via [`.github/workflows/discover-go-face-lineages.yml`](.github/workflows/discover-go-face-lineages.yml) — weekly scan of upstream `ghcr.io/andriykalashnykov/go-face/dlib*` with automatic discovery-issue creation (no auto-PR, no auto-merge — chain of trust preserved for the maintainer to review) when a new dlib major lineage appears upstream.
 - **Four first-class Dockerfiles** covering different build strategies: primary production (`Dockerfile.go-face`, used by CI), self-contained Ubuntu builder (`Dockerfile.ubuntu.builder`), minimal alpine runtime (`Dockerfile.alpine.runtime`), and skip-go-face alternative (`Dockerfile.dlib-docker-go`). All four are hadolint-clean, use pinned base image digests with `--no-install-recommends` + apt cleanup, ship SHA256 verification on Go tarball downloads, and have been end-to-end verified on amd64 + arm64 + arm/v7. See [Dockerfiles](#dockerfiles).
 
+<p align="center"><img src="docs/diagrams/out/c4-context.png" alt="C4 System Context — go-face-recognition sits on top of the dlib-docker → go-face build chain and publishes signed artefacts to GHCR and Sigstore" width="720"></p>
+
+System context: this repo is the top of a three-repo build chain that publishes signed artefacts to GHCR (container images) and to GitHub Releases (binary tarballs), with Sigstore Fulcio + Rekor providing the chain of trust. See [Architecture](#architecture) for the per-container view and the bug-class breakdown.
+
 ## Tech Stack
 
 | Component | Technology |
@@ -57,27 +61,64 @@ ghcr.io/andriykalashnykov/go-face-recognition:<app-version>         ← this rep
 | Testing | `go test` (unit, host), `go test -tags integration` (real dlib pipeline, inside builder), `make e2e` (binary smoke), `make image-verify` (per-lineage CI equivalent) |
 | Dependency updates | Renovate (branch automerge, squash) + scheduled upstream lineage discovery workflow |
 
-## Prerequisites
+## Quick Start
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| [GNU Make](https://www.gnu.org/software/make/) | 3.81+ | Build orchestration |
-| [Go](https://go.dev/dl/) | 1.26.2 | Language runtime (CGO enabled) |
-| [Git](https://git-scm.com/) | 2.0+ | Version control |
-| [Docker](https://www.docker.com/) | latest | Container builds and runtime |
-| [golangci-lint](https://golangci-lint.run/) | 2.11.4 | Go linters (auto-installed by `make deps`) |
-| [hadolint](https://github.com/hadolint/hadolint) | 2.14.0 | Dockerfile linting (auto-installed by `make deps-hadolint`) |
-| [actionlint](https://github.com/rhysd/actionlint) | 1.7.12 | GitHub Actions workflow linting (auto-installed by `make deps-actionlint`) |
-| [shellcheck](https://github.com/koalaman/shellcheck) | 0.11.0 | Shell script linting (auto-installed by `make deps-shellcheck`) |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | 8.30.1 | Secret scanning (auto-installed by `make deps-gitleaks`) |
-| [Trivy](https://trivy.dev/) | 0.69.3 | Filesystem/image security scanning (auto-installed by `make deps-trivy`) |
-| [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | 1.2.0 | Go module vulnerability scanning (auto-installed by `make deps-govulncheck`) |
-| [act](https://github.com/nektos/act) | 0.2.87 | Run GitHub Actions locally (optional) |
+Three ways to get this running, from least-setup-required to most:
 
-Install Go tool dependencies:
+### 1. Download a pre-built binary (no Docker, no Go toolchain)
 
 ```bash
-make deps
+# Pick the latest release tag from
+# https://github.com/AndriyKalashnykov/go-face-recognition/releases/latest
+VERSION=1.2.3
+ARCH=linux_arm64    # or linux_amd64, linux_armv7
+URL=https://github.com/AndriyKalashnykov/go-face-recognition/releases/download/v${VERSION}
+
+curl -fsSLO "${URL}/go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+curl -fsSLO "${URL}/checksums.txt"
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf "go-face-recognition_${VERSION}_${ARCH}.tar.gz"
+cd "go-face-recognition-${VERSION}" && ./main
+```
+
+See [Release artifacts (pre-built binaries)](#release-artifacts-pre-built-binaries) below for full cosign verification of the checksum bundle.
+
+### 2. Pull a multi-arch container image
+
+```bash
+docker run --rm ghcr.io/andriykalashnykov/go-face-recognition:latest /app/main
+```
+
+Docker picks the right per-platform manifest (`amd64` / `arm64` / `arm/v7`) automatically. To pin against the legacy `dlib19` lineage instead of the default `dlib20`, append `-dlib19` to the tag: `ghcr.io/andriykalashnykov/go-face-recognition:latest-dlib19`. Every published `tag@digest` is cosign-signed — see [Verifying a published image signature](#verifying-a-published-image-signature).
+
+### 3. Develop on this repo
+
+```bash
+make deps          # provision all tools pinned in .mise.toml via mise
+make test          # run host unit tests (pure Go, 98.4% coverage on internal/entity)
+make test-docker   # run the full internal/... unit-test suite inside the builder image (CGO+dlib)
+make e2e           # build Dockerfile.go-face and smoke-test the binary locally
+make image-verify  # build + smoke against every CI matrix lineage pin (pre-push gate)
+```
+
+See [Available Make Targets](#available-make-targets) below for the full list.
+
+## Prerequisites
+
+The only host-side tools you need to install yourself are GNU Make, Git, and Docker. Everything else (Go, Node, hadolint, golangci-lint, actionlint, shellcheck, gitleaks, trivy, govulncheck, act) is pinned in `.mise.toml` and provisioned by [mise](https://mise.jdx.dev) when you run `make deps` — no manual install of language toolchains or linters required.
+
+| Tool | Source | Purpose |
+|------|--------|---------|
+| [GNU Make](https://www.gnu.org/software/make/) | system package | Build orchestration |
+| [Git](https://git-scm.com/) | system package | Version control |
+| [Docker](https://www.docker.com/) | system package | Container builds and runtime (needed for almost every target) |
+| [mise](https://mise.jdx.dev) | auto-installed by `make deps` (`curl https://mise.run \| sh`) | Cross-language version manager — single source of truth for Go, Node, and every linter/scanner version |
+
+All other tool versions are declared in [`.mise.toml`](.mise.toml) and installed by `mise install` (which `make deps` invokes). Renovate's first-class `mise` manager keeps `.mise.toml` up to date automatically.
+
+```bash
+make deps        # install everything pinned in .mise.toml
+make deps-check  # show what's installed
 ```
 
 ### Linux system C development headers (required for CGO build)
@@ -92,41 +133,6 @@ sudo apt-get install -y \
 
 If these headers are missing, tools like `golangci-lint` and `govulncheck` will fail with `fatal error: jpeglib.h: No such file or directory`. On hosts without the headers, use `make image-build` / `make ci-run` — the Docker builder image bundles the full toolchain.
 
-## Quick Start
-
-Three ways to get this running, from least-setup-required to most:
-
-### 1. Download a pre-built binary (no Docker, no Go toolchain)
-
-```bash
-curl -fsSLO "https://github.com/AndriyKalashnykov/go-face-recognition/releases/latest/download/go-face-recognition_<version>_linux_arm64.tar.gz"
-sha256sum -c checksums.txt --ignore-missing
-tar -xzf go-face-recognition_<version>_linux_arm64.tar.gz
-./main
-```
-
-See [Release artifacts (pre-built binaries)](#release-artifacts-pre-built-binaries) below for full cosign verification.
-
-### 2. Pull a multi-arch container image
-
-```bash
-docker run --rm ghcr.io/andriykalashnykov/go-face-recognition:latest /app/main
-```
-
-Docker picks the right per-platform manifest (`amd64` / `arm64` / `arm/v7`) automatically. To pin against the legacy `dlib19` lineage instead of the default `dlib20`, append `-dlib19` to the tag: `ghcr.io/andriykalashnykov/go-face-recognition:latest-dlib19`. Every published `tag@digest` is cosign-signed — see [Verifying a published image signature](#verifying-a-published-image-signature).
-
-### 3. Develop on this repo
-
-```bash
-make deps          # verify required tools (lazily installs most of them)
-make test          # run host unit tests (pure Go, 98.4% coverage on internal/entity)
-make test-docker   # run the full internal/... unit-test suite inside the builder image (CGO+dlib)
-make e2e           # build Dockerfile.go-face and smoke-test the binary locally
-make image-verify  # build + smoke against every CI matrix lineage pin (pre-push gate)
-```
-
-See [Available Make Targets](#available-make-targets) below for the full list.
-
 ## Architecture
 
 This project is the top of a three-repo image-build chain. Each upstream repo
@@ -136,9 +142,8 @@ propagates downwards until it's fixed at the root, so understanding the
 chain is essential before making changes that touch linking, CGo flags,
 or base image versions.
 
-<p align="center"><img src="docs/diagrams/out/c4-context.png" alt="C4 System Context — go-face-recognition sits on top of the dlib-docker → go-face build chain and publishes signed artefacts to GHCR and Sigstore" width="720"></p>
-
-Source: [`docs/diagrams/c4-context.puml`](docs/diagrams/c4-context.puml) — rendered via `make diagrams`.
+The C4 System Context diagram at the top of this README shows the layered
+chain end-to-end. Source: [`docs/diagrams/c4-context.puml`](docs/diagrams/c4-context.puml) — rendered via `make diagrams`.
 
 ### Container view
 
@@ -181,55 +186,9 @@ sequenceDiagram
   M->>D: SaveImage("images/result.jpg")
 ```
 
-```text
-┌──────────────────────────────────────────────────────────────────────┐
-│  AndriyKalashnykov/dlib-docker          (this project's grandparent) │
-│  https://github.com/AndriyKalashnykov/dlib-docker                    │
-│                                                                      │
-│  Ubuntu noble + apt{cmake,blas,lapack,jpeg,…} + `davisking/dlib`     │
-│  built from source via `cmake -DBUILD_SHARED_LIBS={ON,OFF}` (two     │
-│  passes, so /usr/local/lib ships BOTH libdlib.so AND libdlib.a       │
-│  for downstream static linking). Exports ENV LIBRARY_PATH=/usr/local │
-│  /lib so downstream `ld -ldlib` resolves the static archive.         │
-│                                                                      │
-│  Publishes:                                                          │
-│    ghcr.io/andriykalashnykov/dlib-docker:19.24.9                     │
-│    ghcr.io/andriykalashnykov/dlib-docker:20.0.1                      │
-└───────────────────────────┬──────────────────────────────────────────┘
-                            │ FROM (digest-pinned)
-                            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  AndriyKalashnykov/go-face              (this project's parent)      │
-│  https://github.com/AndriyKalashnykov/go-face                        │
-│                                                                      │
-│  dlib-docker + Go toolchain (version extracted from go.mod) + the    │
-│  go-face CGo bindings source tree copied into /app. Matrix-built    │
-│  against every `active` dlib lineage defined in `.dlib-versions.     │
-│  json`; one image per lineage is published with a suffix.            │
-│                                                                      │
-│  Publishes:                                                          │
-│    ghcr.io/andriykalashnykov/go-face/dlib19:0.1.4                    │
-│    ghcr.io/andriykalashnykov/go-face/dlib20:0.1.4                    │
-└───────────────────────────┬──────────────────────────────────────────┘
-                            │ FROM (digest-pinned, per CI matrix cell)
-                            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  AndriyKalashnykov/go-face-recognition  (this repo)                  │
-│  https://github.com/AndriyKalashnykov/go-face-recognition            │
-│                                                                      │
-│  The actual application: uses go-face to detect + classify faces     │
-│  against baked-in `persons/` and `images/unknown.jpg`, annotates     │
-│  the output via `internal/entity/drawer.go`, and writes              │
-│  `images/result.jpg`. Built as a fully-static binary                 │
-│  (`-extldflags -static` + `static_build` tag) linking against        │
-│  libdlib.a from the layer above, then COPYed into a minimal          │
-│  alpine runtime stage running as non-root UID 10001.                 │
-│                                                                      │
-│  CI matrix builds + publishes against every go-face dlib lineage:    │
-│    ghcr.io/andriykalashnykov/go-face-recognition:<tag>               │
-│    ghcr.io/andriykalashnykov/go-face-recognition:<tag>-dlib19        │
-└──────────────────────────────────────────────────────────────────────┘
-```
+<p align="center"><img src="docs/diagrams/out/c4-build-chain.png" alt="Three-repo image-build chain — dlib-docker → go-face → go-face-recognition. Each layer pins its parent by digest; this repo is the top." width="520"></p>
+
+Source: [`docs/diagrams/c4-build-chain.puml`](docs/diagrams/c4-build-chain.puml) — rendered via `make diagrams`.
 
 **What each layer owns:**
 
@@ -314,9 +273,9 @@ After loading the people, the software reads an image from the `images/` directo
 
 The output of the system is a new image with the faces marked and the name of each identified person. The generated image will be saved in the `images/` directory with the name `result.jpg`.
 
-## Build & Package
+## Building on macOS
 
-### Building on macOS
+> Linux/CGO build instructions are covered above in [Prerequisites → Linux system C development headers](#linux-system-c-development-headers-required-for-cgo-build); the standard `make build` target produces the `linux/amd64` binary on hosts with the apt headers installed. The notes below are macOS-specific (cross-toolchain + Homebrew dlib).
 
 Install OpenBLAS etc:
 
@@ -390,8 +349,8 @@ Three-layer test pyramid plus matrix verification:
 | `make trivy-fs` | Scan filesystem for vulnerabilities, secrets, and misconfigurations |
 | `make vulncheck` | Check for known vulnerabilities in Go dependencies (requires C toolchain) |
 | `make vulncheck-docker` | Run govulncheck inside the builder image (bypasses host CGO/dlib requirement) |
-| `make static-check` | Composite quality gate (`lint-ci`, `lint`, `secrets`, `trivy-fs`, `mermaid-lint`, `diagrams-check`, `deps-prune-check`) |
-| `make update` | Update dependency packages to latest versions and run `make ci` |
+| `make static-check-host` | Host-runnable composite gate (`lint-ci`, `secrets`, `trivy-fs`, `mermaid-lint`, `diagrams-check`, `deps-prune-check`) — used by CI; no CGO/dlib needed |
+| `make static-check` | Full composite gate = `static-check-host` + `lint` (requires CGO/dlib host toolchain) |
 
 ### Docker
 
@@ -417,15 +376,10 @@ Three-layer test pyramid plus matrix verification:
 
 | Target | Description |
 |--------|-------------|
-| `make deps` | Verify required tool dependencies |
-| `make deps-act` | Install act for local CI |
-| `make deps-hadolint` | Install hadolint for Dockerfile linting |
-| `make deps-shellcheck` | Install shellcheck for shell script linting |
-| `make deps-actionlint` | Install actionlint for GitHub Actions workflow linting |
-| `make deps-gitleaks` | Install gitleaks for secret scanning |
-| `make deps-trivy` | Install Trivy for filesystem and image security scanning |
-| `make deps-govulncheck` | Install govulncheck for Go module vulnerability scanning |
+| `make deps` | Install all tools pinned in `.mise.toml` (auto-bootstraps mise locally; no-op if everything is already installed) |
+| `make deps-check` | Show installed mise tools (diagnostic) |
 | `make deps-prune-check` | Verify go.mod and go.sum are tidy |
+| `make update` | Update Go dependencies to latest versions and re-run `make ci` |
 
 ### Release
 
@@ -449,9 +403,11 @@ GitHub Actions runs on every push to `main`, tags `v*`, and pull requests.
 
 | Workflow | Triggers | Summary |
 |----------|----------|---------|
-| **ci** (`static-check` + `test` + `integration-test` + `e2e-compose` jobs) | push, PR | Host-runnable gates. `static-check` runs `lint-ci` + `secrets` + `trivy-fs`; `test` runs host unit tests; `integration-test` runs `//go:build integration` inside the builder image; `e2e-compose` exercises `docker-compose.yml`. Gate the `docker` job via `needs:`. |
-| **ci** (`docker` job) | push, PR, tags | `strategy.matrix` over every supported upstream `go-face` dlib major lineage (currently `dlib19` + `dlib20`). Each matrix cell runs the full seven-gate hardening pipeline (build + Trivy image scan + smoke test + container-structure-test + multi-arch build + cosign signing + SBOM attestation) independently with its own GHA cache scope. Publishes multi-arch image (amd64, arm64, arm/v7) to GHCR on tag pushes only. |
-| **ci** (`ci-pass` aggregator) | push, PR, tags | `if: always()`, `needs:` every upstream job. Branch protection references this job only — matrix-cell renames can't silently bypass protection. |
+| **ci** (`changes` detector) | push, PR, tags | Cheap (~10 s) `dorny/paths-filter` job that emits two flags: `code=true` for non-docs changes (drives cheap host jobs) and `image=true` for changes affecting the produced binary or its runtime contract (Dockerfiles, docker-compose.yml, container-structure-test.yaml, Makefile, go.mod/sum, cmd/**, internal/**, baked-in models/persons/fonts/images, ci.yml). Heavy jobs gate on `code AND (image OR is-tag)` — non-image-affecting code edits (CODEOWNERS, renovate.json) skip the heavy jobs while tag pushes always run them. Replaces trigger-level `paths-ignore`, which deadlocked under Repository Rulesets. |
+| **ci** (`static-check` + `test` jobs) | push, PR | Cheap host gates. `static-check` calls `make static-check-host` as one composite step (lint-ci + secrets + trivy-fs + mermaid-lint + diagrams-check + deps-prune-check); `test` runs host unit tests after `needs: [static-check]` for fail-fast. |
+| **ci** (`integration-test` + `e2e` jobs) | push, PR (image-affecting), tags | `integration-test` runs `//go:build integration` inside the builder image; `e2e` runs `make e2e-compose` to exercise `docker-compose.yml`. Both gated on the `image` change-flag (or tag push) — they pull the ~1.5–2 GB upstream builder image and the `e2e` cold compose build runs 10–14 min, so non-image-affecting code PRs skip them. |
+| **ci** (`docker` job) | push, PR (image-affecting), tags | `strategy.matrix` over every supported upstream `go-face` dlib major lineage (currently `dlib19` + `dlib20`). Each matrix cell runs the full seven-gate hardening pipeline (build + Trivy image scan + smoke test + container-structure-test + multi-arch build + cosign signing + SBOM attestation) independently with its own GHA cache scope. **Cost optimization**: GATE 4 (`Build and push`) builds `linux/amd64` only on non-tag pushes (validation) and full multi-arch (`amd64,arm64,arm/v7`) on tag pushes (publish). arm64 + arm/v7 builds run dlib under QEMU at ~5–8× native wall-clock, so this saves ~80–90% of docker-job time on routine PRs while still validating cross-arch on release day. Publishes multi-arch image to GHCR on tag pushes only. |
+| **ci** (`ci-pass` aggregator) | push, PR, tags | `if: always()`, `needs:` every upstream job (incl. `changes`). Branch protection references this job only — matrix-cell renames can't silently bypass protection. `skipped` results count as success so docs-only PRs (only `changes` runs, everything else skips) clear the Ruleset gate. |
 | **ci** (`release-artifacts-extract` + `release-artifacts-publish` jobs) | tag pushes only | `needs: [docker]`. Extracts `/app/main` + `fonts/` + `models/` + `persons/` + `images/` from every per-platform manifest of every lineage image, packages each as a deterministic reproducible tarball (`tar --sort=name --mtime=@0 --owner=0 --group=0 \| gzip -n`), produces `checksums.txt` covering all six tarballs, cosign-blob-signs it with keyless OIDC (same chain of trust as the image signing), creates the GitHub Release if missing, and uploads everything. See "Release artifacts" below. |
 | **cleanup-runs** | weekly (Sunday 00:00 UTC), `workflow_dispatch` | Remove old workflow runs via native `gh` CLI |
 | **discover-go-face-lineages** | weekly (Monday 06:00 UTC), `workflow_dispatch` | Scan upstream `ghcr.io/andriykalashnykov/go-face/dlib*` via the anonymous Docker Registry v2 token flow, diff against the lineages currently pinned in `ci.yml`, and open one idempotent discovery issue per new lineage with the latest semver tag + immutable manifest digest pre-filled. Cites the "Adding a new go-face dlib lineage" playbook in [`CLAUDE.md`](CLAUDE.md). No auto-PR or auto-merge — chain of trust preserved. |

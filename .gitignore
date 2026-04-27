@@ -29,3 +29,7 @@ main
 bin/app
 /testdata
 **coverage.out
+
+# Workspace-relative tmpdirs created by `make mermaid-lint` (kept inside
+# CURDIR so docker-in-docker bind mounts work under act / make ci-run).
+.mermaid-lint.*

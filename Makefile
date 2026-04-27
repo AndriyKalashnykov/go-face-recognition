@@ -1,42 +1,32 @@
 SHELL := /bin/bash
 
-# Ensure tools installed to ~/.local/bin and $(GOPATH)/bin (hadolint, act,
-# gitleaks, actionlint, govulncheck, trivy, shellcheck, etc.) are on PATH for
-# every recipe — needed inside the act runner container where neither path is
-# preconfigured. Exported so every sub-shell the recipes spawn inherits it.
-export PATH := $(HOME)/.local/bin:$(HOME)/go/bin:$(PATH)
+# Ensure mise shims and Go's GOPATH/bin are on PATH for every recipe — needed
+# inside the act runner container where neither path is preconfigured.
+# Exported so every sub-shell the recipes spawn inherits it.
+export PATH := $(HOME)/.local/share/mise/shims:$(HOME)/.local/bin:$(HOME)/go/bin:$(PATH)
 
 # ──────────────────────────────────────────────────────────────
-# Tool versions (pinned, Renovate-tracked via inline comments)
+# Tool versions
 # ──────────────────────────────────────────────────────────────
-# Source of truth: .mise.toml (go, node). Keep `.nvmrc` around because some
-# tooling (notably `corepack` / IDE integrations) reads it directly; mise
-# reads it natively too.
+# SINGLE SOURCE OF TRUTH for tool versions is `.mise.toml` (and `go.mod`,
+# `.nvmrc` which mise reads natively). The `deps` target runs `mise install`
+# which provisions go, node, hadolint, golangci-lint, actionlint, shellcheck,
+# gitleaks, trivy, govulncheck, act — pinned exactly as declared in
+# `.mise.toml`. Renovate's first-class `mise` manager updates `.mise.toml`
+# automatically; no per-tool customManager regex is needed.
+#
+# The constants below are the EXCEPTIONS — tools mise cannot manage (Docker
+# images consumed via `docker run`, host-side multiarch helpers) — and are
+# tracked by the generic Makefile customManager regex in `renovate.json`.
 NODE_VERSION       := $(shell cat .nvmrc 2>/dev/null || echo 24)
-# renovate: datasource=docker depName=golang
-GO_VER             := 1.26.2
-# renovate: datasource=github-releases depName=nektos/act
-ACT_VERSION        := 0.2.87
-# renovate: datasource=github-releases depName=hadolint/hadolint
-HADOLINT_VERSION   := 2.14.0
-# renovate: datasource=github-releases depName=golangci/golangci-lint
-GOLANGCI_VERSION   := 2.11.4
-# renovate: datasource=github-releases depName=rhysd/actionlint
-ACTIONLINT_VERSION := 1.7.12
-# renovate: datasource=github-releases depName=koalaman/shellcheck
-SHELLCHECK_VERSION := 0.11.0
-# renovate: datasource=github-releases depName=gitleaks/gitleaks
-GITLEAKS_VERSION   := 8.30.1
-# renovate: datasource=github-releases depName=aquasecurity/trivy
-TRIVY_VERSION      := 0.69.3
-# renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
-GOVULNCHECK_VERSION := 1.2.0
+GO_VER             := $(shell awk '/^go [0-9]/ {print $$2}' go.mod 2>/dev/null || echo 1.26.2)
+
 # renovate: datasource=docker depName=minlag/mermaid-cli
 MERMAID_CLI_VERSION := 11.12.0
 # renovate: datasource=docker depName=plantuml/plantuml
 PLANTUML_VERSION    := 1.2026.2
-# renovate: datasource=github-releases depName=GoogleContainerTools/container-structure-test
-CONTAINER_STRUCTURE_TEST_VERSION := 1.22.1
+# renovate: datasource=docker depName=tonistiigi/binfmt versioning=loose
+BINFMT_VERSION      := qemu-v10.2.1
 
 DOCKER_PLATFORM    ?= linux/amd64
 # Primary builder lineage for local `make image-build` — matches the CI matrix
@@ -77,66 +67,37 @@ DOCKERFILES     := $(wildcard Dockerfile.*)
 help:
 	@grep -E '^#[a-zA-Z0-9_-]+:.*@' $(MAKEFILE_LIST) | sort | sed 's/^#//' | awk 'BEGIN {FS = ": *@ *"}; {printf "\033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
-#deps: @ Verify required tool dependencies
+#deps: @ Install all tools pinned in .mise.toml (auto-bootstraps mise locally)
+# In CI, jdx/mise-action pre-installs mise on the runner, so this target's
+# bootstrap branch (curl https://mise.run | sh) is locally-only-guarded by
+# `[ -z "$$CI" ]`. Either way, the second step (`mise install`) runs in BOTH
+# environments and is the actual contract: every tool listed in `.mise.toml`
+# is provisioned at the pinned version. mise install is idempotent — no-op
+# when everything is already at the pinned version.
 deps:
-	@command -v go     >/dev/null 2>&1 || { echo "ERROR: go is not installed";     exit 1; }
-	@command -v git    >/dev/null 2>&1 || { echo "ERROR: git is not installed";    exit 1; }
+	@if [ -z "$$CI" ] && ! command -v mise >/dev/null 2>&1; then \
+		echo "Installing mise (no root required, installs to ~/.local/bin)..."; \
+		curl -fsSL https://mise.run | sh; \
+		echo ""; \
+		echo "mise installed. Activate it in your shell, then re-run 'make deps':"; \
+		echo '  bash: echo '\''eval "$$(~/.local/bin/mise activate bash)"'\'' >> ~/.bashrc'; \
+		echo '  zsh:  echo '\''eval "$$(~/.local/bin/mise activate zsh)"'\''  >> ~/.zshrc'; \
+		exit 0; \
+	fi
+	@command -v mise >/dev/null 2>&1 || { echo "ERROR: mise is required but not on PATH (CI environment should pre-install it via jdx/mise-action)"; exit 1; }
+	@command -v git >/dev/null 2>&1 || { echo "ERROR: git is not installed"; exit 1; }
 	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed"; exit 1; }
 	@docker buildx version >/dev/null 2>&1 || { echo "ERROR: docker buildx is not installed"; exit 1; }
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint v$(GOLANGCI_VERSION)..."; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $$(go env GOPATH)/bin v$(GOLANGCI_VERSION); }
-	@echo "All dependencies satisfied."
+	@mise install
+	@echo "All dependencies satisfied (provisioned via mise)."
 
-#deps-act: @ Install act for local CI
-deps-act: deps
-	@command -v act >/dev/null 2>&1 || { echo "Installing act $(ACT_VERSION)..."; \
-		mkdir -p $$HOME/.local/bin; \
-		curl -sSfL https://raw.githubusercontent.com/nektos/act/master/install.sh | bash -s -- -b $$HOME/.local/bin v$(ACT_VERSION); \
-	}
-
-#deps-hadolint: @ Install hadolint for Dockerfile linting
-deps-hadolint:
-	@command -v hadolint >/dev/null 2>&1 || { echo "Installing hadolint $(HADOLINT_VERSION)..."; \
-		mkdir -p $$HOME/.local/bin; \
-		curl -sSfL -o /tmp/hadolint https://github.com/hadolint/hadolint/releases/download/v$(HADOLINT_VERSION)/hadolint-Linux-x86_64 && \
-		install -m 755 /tmp/hadolint $$HOME/.local/bin/hadolint && \
-		rm -f /tmp/hadolint; \
-	}
-
-#deps-shellcheck: @ Install shellcheck for shell script linting
-deps-shellcheck:
-	@command -v shellcheck >/dev/null 2>&1 || { echo "Installing shellcheck $(SHELLCHECK_VERSION)..."; \
-		mkdir -p $$HOME/.local/bin; \
-		curl -sSfL -o /tmp/shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).linux.x86_64.tar.xz && \
-		tar -xJf /tmp/shellcheck.tar.xz -C /tmp && \
-		install -m 755 /tmp/shellcheck-v$(SHELLCHECK_VERSION)/shellcheck $$HOME/.local/bin/shellcheck && \
-		rm -rf /tmp/shellcheck-v$(SHELLCHECK_VERSION) /tmp/shellcheck.tar.xz; \
-	}
-
-#deps-actionlint: @ Install actionlint for GitHub Actions workflow linting
-deps-actionlint: deps deps-shellcheck
-	@command -v actionlint >/dev/null 2>&1 || { echo "Installing actionlint $(ACTIONLINT_VERSION)..."; \
-		go install github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLINT_VERSION); }
-
-#deps-gitleaks: @ Install gitleaks for secret scanning
-deps-gitleaks:
-	@command -v gitleaks >/dev/null 2>&1 || { echo "Installing gitleaks $(GITLEAKS_VERSION)..."; \
-		mkdir -p $$HOME/.local/bin; \
-		curl -sSfL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$(GITLEAKS_VERSION)/gitleaks_$(GITLEAKS_VERSION)_linux_x64.tar.gz && \
-		tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks && \
-		install -m 755 /tmp/gitleaks $$HOME/.local/bin/gitleaks && \
-		rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks; \
-	}
-
-#deps-trivy: @ Install Trivy for filesystem and image security scanning
-deps-trivy: deps
-	@command -v trivy >/dev/null 2>&1 || { echo "Installing trivy $(TRIVY_VERSION)..."; \
-		curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b $$(go env GOPATH)/bin v$(TRIVY_VERSION); }
-
-#deps-govulncheck: @ Install govulncheck for Go module vulnerability scanning
-deps-govulncheck: deps
-	@command -v govulncheck >/dev/null 2>&1 || { echo "Installing govulncheck $(GOVULNCHECK_VERSION)..."; \
-		go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION); }
+#deps-check: @ Show installed mise tools
+deps-check:
+	@echo "--- .mise.toml ---"
+	@cat .mise.toml
+	@echo
+	@echo "--- mise ls ---"
+	@mise ls 2>&1 || { echo "ERROR: mise not installed — run 'make deps'"; exit 1; }
 
 #clean: @ Remove build artifacts and generated files
 clean:
@@ -317,36 +278,40 @@ format-check: deps
 	@echo "Go source is properly formatted."
 
 #lint: @ Run Go linters (golangci-lint with gosec/gocritic/errorlint) and hadolint
-lint: deps deps-hadolint
+lint: deps
 	@golangci-lint run ./...
 	@hadolint $(DOCKERFILES)
 
 #lint-ci: @ Lint GitHub Actions workflows with actionlint
-lint-ci: deps-actionlint
+lint-ci: deps
 	@actionlint
 
 #secrets: @ Scan for hardcoded secrets with gitleaks
-secrets: deps-gitleaks
+secrets: deps
 	@gitleaks detect --source . --verbose --redact
 
 #trivy-fs: @ Scan filesystem for vulnerabilities, secrets, and misconfigurations
-trivy-fs: deps-trivy
+trivy-fs: deps
 	@trivy fs --scanners vuln,secret,misconfig --severity CRITICAL,HIGH .
 
 #vulncheck: @ Check for known vulnerabilities in Go dependencies (requires C toolchain)
-vulncheck: deps-govulncheck
+vulncheck: deps
 	@govulncheck ./...
 
 #vulncheck-docker: @ Run govulncheck inside the builder image (bypasses host CGO/dlib requirement)
+# Reads the govulncheck pin from .mise.toml so the Docker invocation stays in
+# lockstep with the host `vulncheck` target. mise itself is not required
+# inside the builder image — we only extract the version string.
 vulncheck-docker: deps
-	@docker run --rm \
+	@gv_version=$$(awk -F'"' '/govulncheck/ {print $$4}' .mise.toml); \
+	docker run --rm \
 		-v $(CURDIR):/app \
 		-w /app \
 		--user root \
 		-e GOFLAGS=-mod=mod \
 		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 		$(BUILDER_IMAGE) \
-		sh -c "go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) && govulncheck ./..."
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@v$$gv_version && govulncheck ./..."
 
 # NOTE: `vulncheck` is intentionally NOT included in `static-check`.
 # govulncheck loads packages via `go build`, which for this project requires
@@ -364,7 +329,11 @@ vulncheck-docker: deps
 # display" box) and we want that caught in CI, not in production.
 mermaid-lint:
 	@set -euo pipefail; \
-		tmpdir=$$(mktemp -d); \
+		if [ "$${ACT:-false}" = "true" ]; then \
+			echo "→ mermaid-lint: SKIPPED under act (docker-in-docker volume mounts don't survive act's docker-cp workspace copy-in). Runs unmodified on real GitHub Actions."; \
+			exit 0; \
+		fi; \
+		tmpdir=$$(mktemp -d -p "$(CURDIR)" .mermaid-lint.XXXXXX); \
 		trap 'rm -rf "$$tmpdir"' EXIT; \
 		i=0; \
 		for md in $$(git ls-files '*.md' 2>/dev/null); do \
@@ -417,9 +386,23 @@ diagrams-check: diagrams
 		|| { echo "ERROR: docs/diagrams/*.puml changed but docs/diagrams/out/ not updated. Run 'make diagrams' and commit."; exit 1; }
 	@echo "PASS: committed PlantUML output matches source."
 
-#static-check: @ Composite quality gate (lint-ci, lint, secrets, trivy-fs, mermaid-lint, diagrams-check, deps-prune-check)
-static-check: lint-ci lint secrets trivy-fs mermaid-lint diagrams-check deps-prune-check
-	@echo "Static check passed."
+#static-check-host: @ Host-runnable composite gate (no CGO/dlib needed) — used by CI
+# Subset of `static-check` that excludes the CGO-requiring `lint` target so it
+# can run on a stock GitHub Actions runner (no libjpeg-dev/libdlib-dev/openblas).
+# Wired into the CI `static-check` job as a single composite step. The full
+# `lint` (golangci-lint with gosec/gocritic on internal/usecases) is exercised
+# inside the docker job's GATE 1 (build-for-scan) where the dlib C toolchain
+# is available via the builder image.
+static-check-host: lint-ci secrets trivy-fs mermaid-lint diagrams-check deps-prune-check
+	@echo "Static check (host-safe subset) passed."
+
+#static-check: @ Full composite quality gate (host-safe subset + CGO-requiring lint)
+# Requires libjpeg-dev/libdlib-dev/libopenblas-dev/openblas headers on the host
+# because `make lint` runs golangci-lint which loads CGO-bound packages
+# (internal/usecases imports go-face → dlib). On hosts without those headers,
+# use `make static-check-host` (CI) or run inside the builder image.
+static-check: static-check-host lint
+	@echo "Static check (full) passed."
 
 #run: @ Run the application locally
 run: deps
@@ -481,7 +464,7 @@ image-prune: deps
 
 #image-setup-multiarch: @ Install binfmt handlers for multi-arch Docker
 image-setup-multiarch: deps
-	@docker run --privileged --rm tonistiigi/binfmt --install all
+	@docker run --privileged --rm tonistiigi/binfmt:$(BINFMT_VERSION) --install all
 
 #image-run-ghcr-amd64: @ Run GHCR runtime image on amd64
 image-run-ghcr-amd64: deps
@@ -538,9 +521,23 @@ ci: deps format-check static-check test coverage-check build
 	@echo "CI pipeline passed."
 
 #ci-run: @ Run GitHub Actions workflow locally using act
-ci-run: deps-act
-	@act push --container-architecture linux/amd64 \
-		--artifact-server-path /tmp/act-artifacts
+# act's synthetic push-event payload omits `repository.default_branch`, which
+# `dorny/paths-filter` (the `changes` detector job) requires on push events to
+# compute the diff base. Without a custom payload the action errors with
+# "This action requires 'base' input to be configured or
+#  'repository.default_branch' to be set in the event payload" — and every
+# downstream job that gates on `needs.changes.outputs.code` skips. Generate a
+# minimal payload with mktemp so the `changes` job behaves the same locally as
+# in real GitHub Actions. See `/ci-workflow` skill "Path-Filter Strategy" §15a.
+ci-run: deps
+	@event=$$(mktemp --suffix=.json); \
+		trap 'rm -f "$$event"' EXIT; \
+		head=$$(git rev-parse HEAD); \
+		before=$$(git rev-parse HEAD~1 2>/dev/null || echo "0000000000000000000000000000000000000000"); \
+		printf '{"ref":"refs/heads/main","before":"%s","after":"%s","repository":{"default_branch":"main","name":"go-face-recognition","full_name":"AndriyKalashnykov/go-face-recognition"}}' "$$before" "$$head" > "$$event"; \
+		act push --container-architecture linux/amd64 \
+			--eventpath "$$event" \
+			--artifact-server-path /tmp/act-artifacts
 
 #renovate-bootstrap: @ Install mise + Node (per .mise.toml) for Renovate
 renovate-bootstrap:
@@ -562,12 +559,11 @@ renovate-validate: renovate-bootstrap
 		npx --yes renovate --platform=local; \
 	fi
 
-.PHONY: help deps deps-act deps-hadolint deps-shellcheck deps-actionlint \
-        deps-gitleaks deps-trivy deps-govulncheck clean test \
+.PHONY: help deps deps-check clean test \
         test-docker integration-test e2e e2e-compose image-verify build \
         build-arm64 format format-check lint lint-ci mermaid-lint secrets trivy-fs vulncheck static-check \
         run update release image-bootstrap image-build image-run-runtime image-run-go-face image-prune \
         image-setup-multiarch image-run-ghcr-amd64 image-run-ghcr-arm64 \
         version tag-delete ci ci-run renovate-bootstrap renovate-validate \
         deps-prune-check coverage-check vulncheck-docker \
-        diagrams diagrams-clean diagrams-check
+        diagrams diagrams-clean diagrams-check static-check-host
