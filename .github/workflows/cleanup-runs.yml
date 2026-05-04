@@ -8,6 +8,11 @@ on:
 
 concurrency:
   group: cleanup-${{ github.workflow }}
+  # Intentional deviation from the canonical CI template (which uses
+  # cancel-in-progress: true): cleanup performs idempotent but mid-flight
+  # destructive write ops (gh run delete, gh api -X DELETE caches). Cancelling
+  # mid-iteration leaves cache deletion partial; safer to let the prior run
+  # finish.
   cancel-in-progress: false
 
 permissions:

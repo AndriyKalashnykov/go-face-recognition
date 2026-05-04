@@ -129,12 +129,22 @@ test-docker: deps
 		-e GOFLAGS=-mod=mod \
 		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 		$(BUILDER_IMAGE) \
-		go test -cover -parallel=1 -v ./internal/...
+		go test -cover -parallel=1 -v ./cmd/... ./internal/...
 
 #integration-test: @ Run integration tests (real dlib pipeline) inside the builder image
 # Tests tagged with `//go:build integration` exercise classify/recognize against
 # the baked-in models/, persons/, and images/ directories. Only runs inside the
 # builder image because it links against dlib.
+#
+# Scope: ./cmd/... + ./internal/usecases/...
+#   ./cmd/...                  — TestRun_* error-branch tests (no build tag,
+#                                 but the package imports go-face → CGO, so
+#                                 it can ONLY compile inside the builder
+#                                 image, which is also the only place
+#                                 integration-test runs). This is the only
+#                                 CI path that exercises the cmd package.
+#   ./internal/usecases/...    — `//go:build integration` end-to-end pipeline
+#                                 tests + the existing unit tests.
 integration-test: deps
 	@docker run --rm \
 		-v $(CURDIR):/app \
@@ -143,7 +153,7 @@ integration-test: deps
 		-e GOFLAGS=-mod=mod \
 		-e PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 		$(BUILDER_IMAGE) \
-		go test -tags integration -v -count=1 -race ./internal/usecases/...
+		go test -tags integration -v -count=1 -race ./cmd/... ./internal/usecases/...
 
 # Alias kept for muscle memory; `integration-test` is the canonical skill
 # target. Remove once no tooling / muscle memory references the old name.
@@ -163,21 +173,31 @@ e2e: deps
 		-t go-face-recognition:e2e . >/dev/null
 	@echo "→ e2e: running the classification pipeline"
 	@docker rm -f gfr-e2e >/dev/null 2>&1 || true
-	@docker run --name gfr-e2e --entrypoint /app/main go-face-recognition:e2e | tee /tmp/gfr-e2e.log
+	@# pipefail so the binary's non-zero exit propagates through `tee` instead
+	@# of being masked by tee's 0 exit. Without this, a SaveImage / classify
+	@# failure inside the binary slips past the recipe and only the grep
+	@# assertions catch it (and only if the failure prevented printing).
+	@set -o pipefail; docker run --name gfr-e2e --entrypoint /app/main go-face-recognition:e2e | tee /tmp/gfr-e2e.log
 	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e.log \
 		|| { echo "FAIL: e2e did not find any faces in baked-in unknown.jpg"; docker rm -f gfr-e2e >/dev/null 2>&1; exit 1; }
 	@grep -qE 'Person: (Trump|Biden)' /tmp/gfr-e2e.log \
 		|| { echo "FAIL: e2e did not classify any baked-in identity (expected Trump or Biden)"; docker rm -f gfr-e2e >/dev/null 2>&1; exit 1; }
-	@tmpjpg=$$(mktemp --suffix=.jpg); \
+	@tmpjpg=$$(mktemp --suffix=.jpg); tmpunk=$$(mktemp --suffix=.jpg); \
 		docker cp gfr-e2e:/app/images/result.jpg "$$tmpjpg" >/dev/null 2>&1 \
-			|| { echo "FAIL: e2e did not produce /app/images/result.jpg"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+			|| { echo "FAIL: e2e did not produce /app/images/result.jpg"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
+		docker cp gfr-e2e:/app/images/unknown.jpg "$$tmpunk" >/dev/null 2>&1 \
+			|| { echo "FAIL: e2e could not extract input unknown.jpg for delta check"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
 		[ -s "$$tmpjpg" ] \
-			|| { echo "FAIL: result.jpg is empty"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+			|| { echo "FAIL: result.jpg is empty"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
 		file -b "$$tmpjpg" | grep -qi 'JPEG image data' \
-			|| { echo "FAIL: result.jpg is not JPEG ($$( file -b $$tmpjpg ))"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
-		rm -f "$$tmpjpg"
+			|| { echo "FAIL: result.jpg is not JPEG ($$( file -b $$tmpjpg ))"; docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
+		if cmp -s "$$tmpjpg" "$$tmpunk"; then \
+			echo "FAIL: result.jpg is byte-identical to unknown.jpg — DrawFace + SaveImage produced a passthrough"; \
+			docker rm -f gfr-e2e >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; \
+		fi; \
+		rm -f "$$tmpjpg" "$$tmpunk"
 	@docker rm -f gfr-e2e >/dev/null 2>&1 || true
-	@echo "PASS: e2e classification pipeline — face count, identity, result.jpg all verified."
+	@echo "PASS: e2e classification pipeline — face count, identity, result.jpg, draw-vs-passthrough all verified."
 
 #e2e-compose: @ Run the pipeline through docker-compose.yml (catches compose drift)
 # Builds via docker-compose.yml (Dockerfile.dlib-docker-go) instead of
@@ -192,14 +212,51 @@ e2e: deps
 e2e-compose: deps
 	@echo "→ e2e-compose: docker compose build (Dockerfile.dlib-docker-go)"
 	@docker compose build --quiet
-	@echo "→ e2e-compose: docker compose run --entrypoint /app/main app"
-	@docker compose run --rm --entrypoint /app/main -T app | tee /tmp/gfr-e2e-compose.log
+	@echo "→ e2e-compose: capturing host-side images/result.jpg mtime for the volume-mount write check"
+	@# images/result.jpg is git-tracked, so we cannot delete it as a sentinel.
+	@# Instead, capture mtime before the run and assert it changed afterwards
+	@# — proves the binary's /app/images/result.jpg write surfaced on the host
+	@# via the docker-compose ./images volume mount. If the mount is dropped
+	@# or flipped to read-only, the binary still exits 0 (writing to overlay)
+	@# but the host file's mtime stays put.
+	@before_mtime=$$(stat -c '%Y' images/result.jpg 2>/dev/null || echo 0); \
+		echo "$$before_mtime" > /tmp/gfr-e2e-compose.mtime
+	@echo "→ e2e-compose: docker compose run --user $$(id -u):$$(id -g) --entrypoint /app/main app"
+	@# --user maps to the host UID/GID so the binary's write to
+	@# /app/images/result.jpg (bind-mounted from host ./images/) succeeds.
+	@# Without this override, the container's baked-in non-root USER (UID
+	@# 10001 from Dockerfile.dlib-docker-go) cannot write to host-owned
+	@# files in the bind mount, causing a silent SaveImage error that the
+	@# new mtime + pipefail checks now catch.
+	@# pipefail so the binary's exit code propagates through `tee`.
+	@set -o pipefail; \
+		docker compose run --rm --user $$(id -u):$$(id -g) \
+			--entrypoint /app/main -T app | tee /tmp/gfr-e2e-compose.log
 	@grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-e2e-compose.log \
 		|| { echo "FAIL: e2e-compose did not find any faces"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
 	@grep -qE 'Person: (Trump|Biden)' /tmp/gfr-e2e-compose.log \
 		|| { echo "FAIL: e2e-compose did not classify any baked-in identity"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
+	@before_mtime=$$(cat /tmp/gfr-e2e-compose.mtime); \
+		after_mtime=$$(stat -c '%Y' images/result.jpg 2>/dev/null || echo 0); \
+		if [ "$$after_mtime" = "$$before_mtime" ] || [ "$$after_mtime" = "0" ]; then \
+			echo "FAIL: e2e-compose did not rewrite images/result.jpg on the host (mtime $$before_mtime → $$after_mtime) — docker-compose volume mount has drifted (./images is no longer rw-mounted to /app/images)"; \
+			docker compose down --remove-orphans >/dev/null 2>&1; exit 1; \
+		fi
+	@file -b images/result.jpg | grep -qi 'JPEG image data' \
+		|| { echo "FAIL: host-side images/result.jpg is not JPEG"; docker compose down --remove-orphans >/dev/null 2>&1; exit 1; }
+	@if cmp -s images/result.jpg images/unknown.jpg; then \
+		echo "FAIL: host-side result.jpg is byte-identical to unknown.jpg — DrawFace produced a passthrough through the compose path"; \
+		docker compose down --remove-orphans >/dev/null 2>&1; exit 1; \
+	fi
+	@rm -f /tmp/gfr-e2e-compose.mtime
 	@docker compose down --remove-orphans >/dev/null 2>&1 || true
-	@echo "PASS: e2e-compose pipeline — face count + identity verified through docker-compose.yml."
+	@# Restore the git-tracked sample to keep the local worktree clean —
+	@# the test asserted the file was rewritten (mtime delta + JPEG sanity +
+	@# passthrough check); we don't want to leave it dirty for the next
+	@# `git status`. JPEG compression isn't byte-deterministic across runs,
+	@# so without restore every e2e-compose run shows up as a diff.
+	@git restore images/result.jpg 2>/dev/null || true
+	@echo "PASS: e2e-compose pipeline — face count + identity + host-volume-write (mtime delta) + draw-vs-passthrough all verified."
 
 #image-verify: @ Build + smoke-test Dockerfile.go-face against every CI matrix lineage
 # This is the local equivalent of the docker job's GATE 1 (build-for-scan) +
@@ -226,20 +283,28 @@ image-verify: deps
 			-t go-face-recognition:verify-$$lineage . >/dev/null; \
 		echo "→ image-verify[$$lineage]: running smoke test"; \
 		docker rm -f gfr-verify-$$lineage >/dev/null 2>&1 || true; \
+		set -o pipefail; \
 		docker run --name gfr-verify-$$lineage --entrypoint /app/main go-face-recognition:verify-$$lineage \
 			| tee /tmp/gfr-verify-$$lineage.log; \
+		set +o pipefail; \
 		grep -q 'Found [1-9][0-9]* faces' /tmp/gfr-verify-$$lineage.log \
 			|| { echo "FAIL: $$lineage smoke test did not find any faces"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; exit 1; }; \
 		grep -qE 'Person: (Trump|Biden)' /tmp/gfr-verify-$$lineage.log \
 			|| { echo "FAIL: $$lineage did not classify any baked-in identity"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; exit 1; }; \
-		tmpjpg=$$(mktemp --suffix=.jpg); \
+		tmpjpg=$$(mktemp --suffix=.jpg); tmpunk=$$(mktemp --suffix=.jpg); \
 		docker cp gfr-verify-$$lineage:/app/images/result.jpg "$$tmpjpg" >/dev/null 2>&1 \
-			|| { echo "FAIL: $$lineage did not produce result.jpg"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
+			|| { echo "FAIL: $$lineage did not produce result.jpg"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
+		docker cp gfr-verify-$$lineage:/app/images/unknown.jpg "$$tmpunk" >/dev/null 2>&1 \
+			|| { echo "FAIL: $$lineage could not extract unknown.jpg for delta check"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
 		file -b "$$tmpjpg" | grep -qi 'JPEG image data' \
-			|| { echo "FAIL: $$lineage result.jpg is not JPEG"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg"; exit 1; }; \
-		rm -f "$$tmpjpg"; \
+			|| { echo "FAIL: $$lineage result.jpg is not JPEG"; docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; }; \
+		if cmp -s "$$tmpjpg" "$$tmpunk"; then \
+			echo "FAIL: $$lineage result.jpg is byte-identical to unknown.jpg — DrawFace + SaveImage produced a passthrough"; \
+			docker rm -f gfr-verify-$$lineage >/dev/null 2>&1; rm -f "$$tmpjpg" "$$tmpunk"; exit 1; \
+		fi; \
+		rm -f "$$tmpjpg" "$$tmpunk"; \
 		docker rm -f gfr-verify-$$lineage >/dev/null 2>&1 || true; \
-		echo "PASS: image-verify[$$lineage] — face count + identity + result.jpg verified."; \
+		echo "PASS: image-verify[$$lineage] — face count + identity + result.jpg + draw-vs-passthrough verified."; \
 	done
 	@echo "PASS: image-verify across all CI matrix lineages."
 
@@ -327,7 +392,7 @@ vulncheck-docker: deps
 # the target. Wired into static-check because broken mermaid silently
 # degrades README rendering on github.com (red "Unable to render rich
 # display" box) and we want that caught in CI, not in production.
-mermaid-lint:
+mermaid-lint: deps
 	@set -euo pipefail; \
 		if [ "$${ACT:-false}" = "true" ]; then \
 			echo "→ mermaid-lint: SKIPPED under act (docker-in-docker volume mounts don't survive act's docker-cp workspace copy-in). Runs unmodified on real GitHub Actions."; \
@@ -479,7 +544,7 @@ version:
 	@echo $(CURRENTTAG)
 
 #tag-delete: @ Delete a specific tag locally and remotely
-tag-delete:
+tag-delete: deps
 	@if [ -z "$(TAG)" ]; then echo "ERROR: TAG is required. Usage: make tag-delete TAG=v1.0.0"; exit 1; fi
 	@if ! echo "$(TAG)" | grep -qE '$(SEMVER_REGEX)'; then \
 		echo "ERROR: '$(TAG)' is not valid semver (expected vX.Y.Z)"; \
@@ -505,8 +570,14 @@ deps-prune-check: deps
 		fi
 	@echo "go.mod/go.sum are tidy."
 
-#coverage-check: @ Fail if total unit-test coverage falls below 80%
-coverage-check: test
+#coverage-check: @ Fail if total unit-test coverage falls below 80% (consumes coverage.out from `make test`)
+# Does NOT chain on `test` — `make ci` runs `test` then `coverage-check` and
+# we don't want a redundant second test run. Standalone callers must run
+# `make test` first; the guard below catches that mistake with a clear hint.
+coverage-check: deps
+	@if [ ! -s coverage.out ]; then \
+		echo "ERROR: coverage.out missing or empty. Run 'make test' first."; exit 1; \
+	fi
 	@go tool cover -func=coverage.out | awk '/total:/ { \
 		pct=$$3; sub("%","",pct); \
 		if (pct+0 < 80) { \
@@ -520,7 +591,7 @@ coverage-check: test
 ci: deps format-check static-check test coverage-check build
 	@echo "CI pipeline passed."
 
-#ci-run: @ Run GitHub Actions workflow locally using act
+#ci-run: @ Run GitHub Actions workflow locally using act (per-job, with snapshotter-race guards)
 # act's synthetic push-event payload omits `repository.default_branch`, which
 # `dorny/paths-filter` (the `changes` detector job) requires on push events to
 # compute the diff base. Without a custom payload the action errors with
@@ -529,15 +600,45 @@ ci: deps format-check static-check test coverage-check build
 # downstream job that gates on `needs.changes.outputs.code` skips. Generate a
 # minimal payload with mktemp so the `changes` job behaves the same locally as
 # in real GitHub Actions. See `/ci-workflow` skill "Path-Filter Strategy" §15a.
+#
+# Why per-job iteration (skill §"Local CI with act"):
+#   Running the whole workflow concurrently makes act spawn every job's
+#   container in parallel and they fight over host Docker resources (port
+#   collisions, snapshotter races). Iterating one --job at a time mirrors the
+#   GitHub Actions DAG more honestly and surfaces failures one job at a time.
+#
+# Why --pull=false + `docker container prune -f` (skill §"Local CI with act"):
+#   On Docker engines using the containerd image store (Docker 25+ default),
+#   force-pulling the runner image triggers the
+#   "RWLayer of container <id> is unexpectedly nil" snapshotter race that
+#   surfaces as exit 137, masquerading as OOM. --pull=false skips that path
+#   entirely; the prune sweeps stopped containers from previous act runs that
+#   would otherwise hold layer references and re-trigger the race.
+#
+# Skipped jobs and why:
+#   - changes        : reachability-only; act can't synthesize a useful diff
+#   - e2e            : runs docker compose inside the act runner (DinD volume
+#                      mounts don't survive act's workspace copy-in)
+#   - release-artifacts-extract / release-artifacts-publish : tag-gated; act
+#                      push events don't carry a tag ref
+#   - ci-pass        : aggregator over `needs:`; meaningless in isolation
 ci-run: deps
+	@docker container prune -f >/dev/null 2>&1 || true
 	@event=$$(mktemp --suffix=.json); \
 		trap 'rm -f "$$event"' EXIT; \
 		head=$$(git rev-parse HEAD); \
 		before=$$(git rev-parse HEAD~1 2>/dev/null || echo "0000000000000000000000000000000000000000"); \
 		printf '{"ref":"refs/heads/main","before":"%s","after":"%s","repository":{"default_branch":"main","name":"go-face-recognition","full_name":"AndriyKalashnykov/go-face-recognition"}}' "$$before" "$$head" > "$$event"; \
-		act push --container-architecture linux/amd64 \
-			--eventpath "$$event" \
-			--artifact-server-path /tmp/act-artifacts
+		for job in static-check test integration-test docker; do \
+			echo "→ ci-run: act push --job $$job"; \
+			act push --container-architecture linux/amd64 \
+				--pull=false \
+				--job "$$job" \
+				--eventpath "$$event" \
+				--artifact-server-path /tmp/act-artifacts \
+				|| { echo "FAIL: act push --job $$job"; exit 1; }; \
+		done
+	@echo "PASS: ci-run iterated through static-check, test, integration-test, docker."
 
 #renovate-bootstrap: @ Install mise + Node (per .mise.toml) for Renovate
 renovate-bootstrap:
@@ -565,5 +666,5 @@ renovate-validate: renovate-bootstrap
         run update release image-bootstrap image-build image-run-runtime image-run-go-face image-prune \
         image-setup-multiarch image-run-ghcr-amd64 image-run-ghcr-arm64 \
         version tag-delete ci ci-run renovate-bootstrap renovate-validate \
-        deps-prune-check coverage-check vulncheck-docker \
+        deps-prune-check coverage-check vulncheck-docker test-integration \
         diagrams diagrams-clean diagrams-check static-check-host

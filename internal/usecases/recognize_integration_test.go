@@ -8,22 +8,33 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/AndriyKalashnykov/go-face"
 	"github.com/AndriyKalashnykov/go-face-recognition/internal/usecases"
 )
 
-// repoRoot must be set to the repo root so we can find models/, persons/,
-// images/ from the test's working directory (internal/usecases).
-const repoRoot = "../.."
+// repoRoot resolves the repo root from THIS file's location at compile time
+// (runtime.Caller(0) returns this file's path), so refactors that move the
+// test file (e.g., into a subpackage) automatically follow without a brittle
+// "../.." string update. The repo root is two directories up from
+// internal/usecases/recognize_integration_test.go.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed — cannot resolve repo root")
+	}
+	return filepath.Join(filepath.Dir(thisFile), "..", "..")
+}
 
 // TestIntegration_RecognizeAndClassify_EndToEnd exercises the full CGO/dlib
 // pipeline against the baked-in models, training images, and unknown.jpg.
 // Runs under `go test -tags integration` only, because the go-face import
 // chain requires the builder image's CGO + dlib headers to compile and link.
 func TestIntegration_RecognizeAndClassify_EndToEnd(t *testing.T) {
-	t.Chdir(repoRoot)
+	t.Chdir(repoRoot(t))
 
 	loadUC := usecases.NewLoadPersonsUseCase()
 	persons, err := loadUC.Execute("persons")
@@ -100,7 +111,7 @@ func writeSolidJPEG(t *testing.T, dir, name string) string {
 // surfaces the "unable to recognize people in the image" error path. This
 // guards the `face == nil` branch in RecognizePersonsUseCaseImpl.Execute.
 func TestIntegration_RecognizePersons_FacelessTrainingImage(t *testing.T) {
-	t.Chdir(repoRoot)
+	t.Chdir(repoRoot(t))
 
 	tmpPersons := t.TempDir()
 	personDir := filepath.Join(tmpPersons, "ghost")
@@ -134,7 +145,7 @@ func TestIntegration_RecognizePersons_FacelessTrainingImage(t *testing.T) {
 // a synthetic faceless JPEG and asserts the `len(unkFaces) == 0` branch
 // returns the "unable to recognize people" error.
 func TestIntegration_ClassifyPersons_FacelessUnknownImage(t *testing.T) {
-	t.Chdir(repoRoot)
+	t.Chdir(repoRoot(t))
 
 	rec, err := face.NewRecognizer("models")
 	if err != nil {
@@ -157,7 +168,7 @@ func TestIntegration_ClassifyPersons_FacelessUnknownImage(t *testing.T) {
 // error (not the faceless error path — faces ARE detected, they just
 // don't meet the threshold).
 func TestIntegration_ClassifyPersons_TightThresholdReturnsEmpty(t *testing.T) {
-	t.Chdir(repoRoot)
+	t.Chdir(repoRoot(t))
 
 	rec, err := face.NewRecognizer("models")
 	if err != nil {
