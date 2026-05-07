@@ -3,7 +3,7 @@ ARG BUILDER_IMAGE="ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b7
 # https://hub.docker.com/_/ubuntu/tags
 FROM ${BUILDER_IMAGE} AS builder
 
-ARG GO_VER=1.26.2
+ARG GO_VER=1.26.3
 # Re-declare the buildx-auto-provided TARGETARCH so it is visible to RUN
 # layers (ARG values from before FROM do NOT automatically propagate).
 # Used by the conditional CGO_LDFLAGS + cross-compile blocks below.
