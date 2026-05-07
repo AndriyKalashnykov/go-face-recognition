@@ -1,6 +1,6 @@
 module github.com/AndriyKalashnykov/go-face-recognition
 
-go 1.26.2
+go 1.26.3
 
 require golang.org/x/image v0.39.0
 
