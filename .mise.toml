@@ -9,7 +9,7 @@
 # match. node is also tracked in .nvmrc (mise reads .nvmrc natively too).
 [tools]
 # Languages — versions match go.mod and .nvmrc respectively.
-go = "1.26.2"
+go = "1.26.3"
 node = "24"
 
 # Linters & quality gates
