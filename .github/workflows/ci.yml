@@ -44,7 +44,7 @@ jobs:
       image: ${{ steps.filter.outputs.image }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Two filters:
       #   `code`  — coarse "is this anything more than a docs change?" gate.
@@ -96,7 +96,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Single source of truth for tool versions is .mise.toml. mise-action
       # installs Go (per .mise.toml `go = "..."` matching go.mod), Node, and
@@ -138,7 +138,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up toolchain (mise)
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
@@ -174,7 +174,7 @@ jobs:
       packages: read    # pull upstream go-face/dlib20 builder from GHCR
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Required by `make integration-test` → `deps` prerequisite. mise-action
       # provisions Go (and every other tool the deps target verifies) from
@@ -216,7 +216,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Required by `make e2e-compose` → `deps` prerequisite (see the
       # equivalent step in the integration-test job for the rationale).
@@ -277,7 +277,7 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -549,7 +549,7 @@ jobs:
             suffix: '-dlib19'
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Lowercase repository owner
         shell: bash
@@ -712,7 +712,7 @@ jobs:
       id-token: write   # cosign keyless OIDC
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Download all lineage tarballs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
