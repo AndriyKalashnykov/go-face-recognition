@@ -79,7 +79,7 @@ RUN <<EOT
 EOT
 
 # https://hub.docker.com/_/alpine/tags
-FROM alpine:3.24.0@sha256:8ddefa941e689fc29abcdeb8dae3b3c6d139cc08ce9a52633931160701770685 AS runtime
+FROM alpine:3.24.0@sha256:a2d49ea686c2adfe3c992e47dc3b5e7fa6e6b5055609400dc2acaeb241c829f4 AS runtime
 
 # Re-declare so the ARG is in scope for LABEL interpolation after FROM.
 ARG BUILDER_IMAGE
