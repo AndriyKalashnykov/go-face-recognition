@@ -20,7 +20,7 @@ node = "24"
 
 # Security scanners
 "aqua:gitleaks/gitleaks"        = "8.30.1"
-"aqua:aquasecurity/trivy"       = "0.71.0"
+"aqua:aquasecurity/trivy"       = "0.71.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.3.0"
 
 # Local-CI runner
