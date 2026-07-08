@@ -18,7 +18,7 @@ FROM ${BUILDER_IMAGE} AS builder
 # hadolint ignore=DL3002
 USER root
 
-ARG GO_VER="1.26.4"
+ARG GO_VER="1.26.5"
 # Re-declare the buildx-auto-provided TARGETARCH so it is visible to RUN
 # layers below (ARG values from before FROM do not propagate past the
 # stage boundary). Used by the conditional CGO_LDFLAGS block below.
