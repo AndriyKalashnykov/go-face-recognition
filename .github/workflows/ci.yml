@@ -44,7 +44,7 @@ jobs:
       image: ${{ steps.filter.outputs.image }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Two filters:
       #   `code`  — coarse "is this anything more than a docs change?" gate.
@@ -96,7 +96,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Single source of truth for tool versions is .mise.toml. mise-action
       # installs Go (per .mise.toml `go = "..."` matching go.mod), Node, and
@@ -105,7 +105,7 @@ jobs:
       # true` caches the resolved mise installs across runs keyed on the
       # .mise.toml hash — version bumps invalidate the cache automatically.
       - name: Set up toolchain (mise)
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+        uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
         with:
           install: true
           cache: true
@@ -138,10 +138,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up toolchain (mise)
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+        uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
         with:
           install: true
           cache: true
@@ -174,7 +174,7 @@ jobs:
       packages: read    # pull upstream go-face/dlib20 builder from GHCR
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Required by `make integration-test` → `deps` prerequisite. mise-action
       # provisions Go (and every other tool the deps target verifies) from
@@ -182,7 +182,7 @@ jobs:
       # act's catthehacker/ubuntu:act-latest doesn't — without this step
       # `make ci-run` fails on a missing `go` binary before any docker work.
       - name: Set up toolchain (mise)
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+        uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
         with:
           install: true
           cache: true
@@ -216,12 +216,12 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Required by `make e2e-compose` → `deps` prerequisite (see the
       # equivalent step in the integration-test job for the rationale).
       - name: Set up toolchain (mise)
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+        uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
         with:
           install: true
           cache: true
@@ -277,7 +277,7 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -406,7 +406,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Log in to GHCR
         if: startsWith(github.ref, 'refs/tags/')
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -549,7 +549,7 @@ jobs:
             suffix: '-dlib19'
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Lowercase repository owner
         shell: bash
@@ -562,7 +562,7 @@ jobs:
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -712,7 +712,7 @@ jobs:
       id-token: write   # cosign keyless OIDC
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download all lineage tarballs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
